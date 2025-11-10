@@ -1,0 +1,1550 @@
+import { useEffect, useState } from "react";
+import axios from "axios";
+import { useTranslation } from "react-i18next";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Filter, Plus, Search, X } from "lucide-react";
+
+// // Custom Select Component (since the original might have issues)
+// const CustomSelect = ({ value, onValueChange, children, disabled = false, className = "" }) => (
+//   <select
+//     value={value}
+//     onChange={(e) => onValueChange(e.target.value)}
+//     disabled={disabled}
+//     className={`w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${disabled ? 'bg-gray-100' : ''} ${className}`}
+//   >
+//     {children}
+//   </select>
+// );
+
+// // Custom Modal Component (fixed implementation)
+// const CustomModal = ({ isOpen, onClose, title, children }) => {
+//   if (!isOpen) return null;
+
+//   return (
+//     <div className="fixed inset-0 z-50 overflow-y-auto">
+//       {/* Backdrop */}
+//       <div 
+//         className="fixed inset-0 bg-black bg-opacity-50 transition-opacity"
+//         onClick={onClose}
+//       />
+      
+//       {/* Modal */}
+//       <div className="flex min-h-full items-center justify-center p-4">
+//         <div className="relative bg-white rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+//           {/* Header */}
+//           <div className="flex items-center justify-between p-4 border-b">
+//             <h3 className="text-lg font-semibold">{title}</h3>
+//             <button
+//               onClick={onClose}
+//               className="text-gray-400 hover:text-gray-600 transition-colors"
+//             >
+//               <X size={20} />
+//             </button>
+//           </div>
+          
+//           {/* Content */}
+//           <div className="p-4">
+//             {children}
+//           </div>
+//         </div>
+//       </div>
+//     </div>
+//   );
+// };
+// Custom Select Component (modernized)
+const CustomSelect = ({ value, onValueChange, children, disabled = false, className = "" }) => (
+  <select
+    value={value}
+    onChange={(e) => onValueChange(e.target.value)}
+    disabled={disabled}
+    className={`w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all duration-200 bg-white/50 backdrop-blur-sm text-gray-900 dark:bg-gray-800/50 dark:border-gray-600 dark:text-gray-100 ${disabled ? 'bg-gray-100 dark:bg-gray-700' : ''} ${className}`}
+  >
+    {children}
+  </select>
+);
+
+// Custom Modal Component (modernized)
+const CustomModal = ({ isOpen, onClose, title, children }) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto">
+      {/* Modern backdrop with blur */}
+      <div 
+        className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
+        onClick={onClose}
+      />
+      
+      {/* Modal with glassmorphism */}
+      <div className="flex min-h-full items-center justify-center p-4">
+        <div className="relative bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-gray-200/50 max-w-md w-full max-h-[90vh] overflow-y-auto dark:bg-gray-800/95 dark:border-gray-700/50">
+          {/* Header */}
+          <div className="flex items-center justify-between p-6 border-b border-gray-200/50 dark:border-gray-700/50">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
+            <button
+              onClick={onClose}
+              className="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+            >
+              <X size={20} />
+            </button>
+          </div>
+          
+          {/* Content */}
+          <div className="p-6">
+            {children}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Custom sorting function
+const sortEntries = (entries) => {
+  return [...entries].sort((a, b) => {
+    return new Date(b.createdAt) - new Date(a.createdAt);
+  });
+};
+
+export default function Entries() {
+  const { t } = useTranslation();
+  
+  // Main state
+  const [entries, setEntries] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [metadata, setMetadata] = useState(null);
+  
+  // Edit state
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState({
+    metalType: "",
+    category: "",
+    purity: "",
+    weight: "",
+    itemCount: "",
+    notes: "",
+    isBulk: false
+  });
+  
+  // Add item state
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [addForm, setAddForm] = useState({
+    metalType: "gold",
+    category: "",
+    purity: "",
+    weight: "",
+    itemCount: "",
+    notes: "",
+    isBulk: false
+  });
+  
+// Filter state
+const [isFilterOpen, setIsFilterOpen] = useState(false);
+const [filters, setFilters] = useState({
+  metalType: "",
+  category: "",
+  purity: "",
+  minWeight: "",
+  maxWeight: "",
+  keyword: "",
+  useGrossWeight: true // Add this new field
+});
+const [activeFilters, setActiveFilters] = useState({});
+  
+  // Available options for dropdowns
+  const [availableCategories, setAvailableCategories] = useState([]);
+  const [availablePurities, setAvailablePurities] = useState([]);
+  
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Fetch entries and metadata
+  const fetchData = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      
+      // Fetch entries with current filters
+      const entriesParams = new URLSearchParams();
+      Object.entries(activeFilters).forEach(([key, value]) => {
+        if (value) entriesParams.append(key, value);
+      });
+      
+      // const [entriesRes, metadataRes] = await Promise.all([
+      //   axios.get(`${import.meta.env.VITE_API_BASE_URL}/api/entries?${entriesParams}`, {
+      //     headers: { Authorization: `Bearer ${token}` }
+      //   }),
+      // Add sortBy parameter when weight filters are used
+if (activeFilters.minWeight || activeFilters.maxWeight) {
+  entriesParams.append('sortBy', 'weight');
+}
+
+const [entriesRes, metadataRes] = await Promise.all([
+  axios.get(`${import.meta.env.VITE_API_BASE_URL}/api/entries?${entriesParams}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  }),
+        axios.get(`${import.meta.env.VITE_API_BASE_URL}/api/metadata`, {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+      ]);
+      
+      // Apply custom sorting to the entries
+// const sortedEntries = sortEntries(entriesRes.data.entries || []);
+// setEntries(sortedEntries);
+// Use backend sorting when weight filters are applied, otherwise use frontend sorting
+if (activeFilters.minWeight || activeFilters.maxWeight) {
+  // Backend already sorted by pure weight, use as-is
+  setEntries(entriesRes.data.entries || []);
+} else {
+  // Apply custom sorting to the entries (by date)
+  const sortedEntries = sortEntries(entriesRes.data.entries || []);
+  setEntries(sortedEntries);
+}
+      setMetadata(metadataRes.data);
+      
+    } catch (err) {
+      console.error("Error fetching data:", err);
+      setEntries([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Filter entries by keyword (notes)
+  const filterEntriesByKeyword = (entries, keyword) => {
+    if (!keyword) return entries;
+    return entries.filter(entry => 
+      entry.notes && entry.notes.toLowerCase().includes(keyword.toLowerCase())
+    );
+  };
+
+  const filteredEntries = filterEntriesByKeyword(entries, activeFilters.keyword);
+
+  useEffect(() => {
+    fetchData();
+  }, [activeFilters]);
+
+  // Update available categories based on selected metal
+  useEffect(() => {
+    if (!metadata?.categoryTotals) return;
+    
+    const metalType = editingId ? editForm.metalType : addForm.metalType;
+    if (!metalType) return;
+    
+    const categories = Object.values(metadata.categoryTotals)
+      .filter(cat => cat.metal === metalType)
+      .map(cat => cat.categoryName);
+    
+    setAvailableCategories([...new Set(categories)]);
+  }, [metadata, editForm.metalType, addForm.metalType, editingId]);
+
+  // Update available purities based on selected metal and category
+  useEffect(() => {
+    if (!metadata?.categoryTotals) return;
+    
+    const form = editingId ? editForm : addForm;
+    const { metalType, category } = form;
+    
+    if (!metalType || !category) {
+      setAvailablePurities([]);
+      return;
+    }
+    
+    const categoryKey = `${category}_${metalType}`;
+    const categoryData = metadata.categoryTotals[categoryKey];
+    
+    if (categoryData?.purities) {
+      const purities = Object.keys(categoryData.purities).map(Number);
+      setAvailablePurities(purities.sort((a, b) => b - a));
+    } else {
+      setAvailablePurities([]);
+    }
+  }, [metadata, editForm, addForm, editingId]);
+
+  // Handle delete
+  const handleDelete = async (id) => {
+    if (!confirm(t("Are you sure you want to delete this entry?"))) return;
+    
+    try {
+      const token = localStorage.getItem("token");
+      await axios.delete(`${import.meta.env.VITE_API_BASE_URL}/api/entries/${id}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      fetchData();
+    } catch (err) {
+      console.error("Failed to delete entry:", err);
+      alert(t("Failed to delete entry. Please try again."));
+    }
+  };
+
+  // Handle edit
+  const handleEdit = (entry) => {
+    setEditingId(entry.id || entry._id);
+    setEditForm({
+      metalType: entry.metalType,
+      category: entry.category,
+      purity: entry.purity.toString(),
+      weight: entry.weight.toString(),
+      itemCount: entry.isBulk ? entry.itemCount.toString() : "",
+      notes: entry.notes || "",
+      isBulk: entry.isBulk
+    });
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editForm.weight || isNaN(editForm.weight) || Number(editForm.weight) <= 0) {
+      alert(t("Please enter a valid weight"));
+      return;
+    }
+
+    if (editForm.isBulk && (!editForm.itemCount || isNaN(editForm.itemCount) || Number(editForm.itemCount) <= 0)) {
+      alert(t("Please enter a valid item count for bulk entry"));
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const token = localStorage.getItem("token");
+      const updateData = {
+        weight: Number(editForm.weight),
+        notes: editForm.notes.trim() || null
+      };
+
+      if (editForm.isBulk) {
+        updateData.itemCount = Number(editForm.itemCount);
+      }
+
+      await axios.put(`${import.meta.env.VITE_API_BASE_URL}/api/entries/${editingId}`, 
+        updateData,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      setEditingId(null);
+      fetchData();
+    } catch (err) {
+      console.error("Failed to update entry:", err);
+      alert(t("Failed to update entry. Please try again."));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditingId(null);
+    setEditForm({
+      metalType: "",
+      category: "",
+      purity: "",
+      weight: "",
+      itemCount: "",
+      notes: "",
+      isBulk: false
+    });
+  };
+
+  // Handle add item
+  const handleAddItem = async () => {
+    if (!addForm.metalType || !addForm.category || !addForm.purity || !addForm.weight) {
+      alert(t("Please fill all required fields"));
+      return;
+    }
+
+    if (isNaN(addForm.weight) || Number(addForm.weight) <= 0) {
+      alert(t("Please enter a valid weight"));
+      return;
+    }
+
+    if (addForm.isBulk && (!addForm.itemCount || isNaN(addForm.itemCount) || Number(addForm.itemCount) <= 0)) {
+      alert(t("Please enter a valid item count for bulk entry"));
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const token = localStorage.getItem("token");
+      const entryData = {
+        metalType: addForm.metalType,
+        category: addForm.category,
+        purity: Number(addForm.purity),
+        weight: Number(addForm.weight),
+        isBulk: addForm.isBulk,
+        notes: addForm.notes.trim() || null,
+        ...(addForm.isBulk && { itemCount: Number(addForm.itemCount) })
+      };
+
+      await axios.post(`${import.meta.env.VITE_API_BASE_URL}/api/entries`, 
+        entryData,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      setIsAddModalOpen(false);
+      resetAddForm();
+      fetchData();
+    } catch (err) {
+      console.error("Failed to add entry:", err);
+      alert(t("Failed to add entry. Please try again."));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Reset add form helper
+  const resetAddForm = () => {
+    setAddForm({
+      metalType: "gold",
+      category: "",
+      purity: "",
+      weight: "",
+      itemCount: "",
+      notes: "",
+      isBulk: false
+    });
+  };
+
+  // Handle modal close for add form
+  const handleCloseAddModal = () => {
+    setIsAddModalOpen(false);
+    resetAddForm();
+  };
+
+  // Handle filter
+  const handleApplyFilter = () => {
+    // Validate weight range requires metal type
+    if ((filters.minWeight || filters.maxWeight) && !filters.metalType) {
+      alert(t("Please select a metal type when filtering by weight range"));
+      return;
+    }
+    
+    setActiveFilters({ ...filters });
+    setIsFilterOpen(false);
+  };
+
+  const handleClearFilter = () => {
+    const clearedFilters = {
+      metalType: "",
+      category: "",
+      purity: "",
+      minWeight: "",
+      maxWeight: "",
+      keyword: "",
+      useGrossWeight: true // Add this line
+    };
+    setFilters(clearedFilters);
+    setActiveFilters({});
+  };
+
+  // Get filter dropdown options
+  const getFilterCategories = () => {
+    if (!metadata?.categoryTotals || !filters.metalType) return [];
+    return [...new Set(Object.values(metadata.categoryTotals)
+      .filter(cat => cat.metal === filters.metalType)
+      .map(cat => cat.categoryName))];
+  };
+
+  const getFilterPurities = () => {
+    if (!metadata?.categoryTotals || !filters.metalType || !filters.category) return [];
+    const categoryKey = `${filters.category}_${filters.metalType}`;
+    const categoryData = metadata.categoryTotals[categoryKey];
+    if (categoryData?.purities) {
+      return Object.keys(categoryData.purities).map(Number).sort((a, b) => b - a);
+    }
+    return [];
+  };
+
+//   const renderEntryCard = (entry) => {
+//     const entryId = entry.id || entry._id;
+//     const isEditing = editingId === entryId;
+    
+//     return (
+//       <Card key={entryId} className="rounded-2xl">
+//         <CardContent className="p-4">
+//           <div className="flex justify-between items-start">
+//             <div className="flex-1">
+//               {isEditing ? (
+//                 <div className="space-y-3">
+//                   <div className="flex items-center gap-2">
+//                     <span className="font-semibold">{t("Weight")}:</span>
+//                     <Input
+//                       type="number"
+//                       value={editForm.weight}
+//                       onChange={(e) => setEditForm({ ...editForm, weight: e.target.value })}
+//                       className="w-24"
+//                       min="0"
+//                       step="0.01"
+//                       autoFocus
+//                     />
+//                     <span>g</span>
+//                   </div>
+                  
+//                   {editForm.isBulk && (
+//                     <div className="flex items-center gap-2">
+//                       <span className="font-semibold">{t("Items")}:</span>
+//                       <Input
+//                         type="number"
+//                         value={editForm.itemCount}
+//                         onChange={(e) => setEditForm({ ...editForm, itemCount: e.target.value })}
+//                         className="w-20"
+//                         min="1"
+//                       />
+//                     </div>
+//                   )}
+                  
+//                   <div className="flex items-center space-x-3">
+//                     <button
+//                       type="button"
+//                       onClick={() => setEditForm({ ...editForm, isBulk: !editForm.isBulk })}
+//                       className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+//                         editForm.isBulk ? 'bg-blue-600' : 'bg-gray-200'
+//                       }`}
+//                     >
+//                       <span
+//                         className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+//                           editForm.isBulk ? 'translate-x-6' : 'translate-x-1'
+//                         }`}
+//                       />
+//                     </button>
+//                     <label className="text-sm font-medium">
+//                       {editForm.isBulk ? t("Bulk Entry") : t("Single Entry")}
+//                     </label>
+//                   </div>
+                  
+//                   <div className="space-y-2">
+//                     <label className="text-sm font-medium">{t("Notes")}</label>
+//                     <Textarea
+//                       value={editForm.notes}
+//                       onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+//                       placeholder={t("Enter notes...")}
+//                       rows={2}
+//                       className="resize-none"
+//                     />
+//                   </div>
+//                 </div>
+//               ) : (
+//                 <div className="space-y-2">
+//                   <div className="flex items-center gap-4 text-sm">
+//                     <span className="font-semibold text-blue-600">{entry.metalType.toUpperCase()}</span>
+//                     <span className="text-gray-600">{entry.category}</span>
+//                     <span className="text-gray-600">{entry.purity}%</span>
+//                   </div>
+                  
+//                   {/* <p className="font-semibold">
+//                     {t("Weight")}: {entry.weight}g
+//                   </p> */}
+//                   <div className="space-y-1">
+//   <p className="font-semibold">
+//     {t("Gross Weight")}: {entry.weight}g
+//   </p>
+//   <p className="font-semibold text-green-600">
+//     {t("Pure Weight")}: {(entry.weight * entry.purity / 100).toFixed(3)}g
+//   </p>
+// </div>
+                  
+//                   {entry.isBulk && (
+//                     <p className="font-semibold">
+//                       {t("Items")}: {entry.itemCount}
+//                     </p>
+//                   )}
+                  
+//                   {entry.notes && (
+//                     <div className="mt-2">
+//                       <p className="text-sm font-medium text-gray-600">{t("Notes")}:</p>
+//                       <p className="text-sm text-gray-800 bg-gray-50 p-2 rounded border-l-4 border-blue-200">
+//                         {entry.notes}
+//                       </p>
+//                     </div>
+//                   )}
+                  
+//                   <p className="text-xs text-gray-500">
+//                     {t("Created")}: {new Date(entry.createdAt).toLocaleDateString("en-GB")}
+//                   </p>
+//                 </div>
+//               )}
+//             </div>
+            
+//             <div className="flex flex-col items-end gap-2 ml-4">
+//               <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded-full text-sm">
+//                 {entry.isBulk ? t("Bulk") : t("Single")}
+//               </span>
+              
+//               <div className="flex gap-2">
+//                 {isEditing ? (
+//                   <>
+//                     <Button
+//                       variant="outline"
+//                       size="sm"
+//                       onClick={handleSaveEdit}
+//                       disabled={isSubmitting || !editForm.weight || isNaN(editForm.weight) || Number(editForm.weight) <= 0}
+//                     >
+//                       {isSubmitting ? t("Saving...") : t("Save")}
+//                     </Button>
+//                     <Button
+//                       variant="ghost"
+//                       size="sm"
+//                       onClick={handleCancelEdit}
+//                       disabled={isSubmitting}
+//                     >
+//                       {t("Cancel")}
+//                     </Button>
+//                   </>
+//                 ) : (
+//                   <>
+//                     <Button
+//                       variant="outline"
+//                       size="sm"
+//                       onClick={() => handleEdit(entry)}
+//                     >
+//                       {t("Edit")}
+//                     </Button>
+//                     <Button
+//                       variant="destructive"
+//                       size="sm"
+//                       onClick={() => handleDelete(entryId)}
+//                     >
+//                       {t("Delete")}
+//                     </Button>
+//                   </>
+//                 )}
+//               </div>
+//             </div>
+//           </div>
+//         </CardContent>
+//       </Card>
+//     );
+//   };
+
+const renderEntryCard = (entry) => {
+  const entryId = entry.id || entry._id;
+  const isEditing = editingId === entryId;
+  
+  return (
+    <Card key={entryId} className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-xl border border-gray-200/50 hover:shadow-2xl transition-all duration-300 dark:bg-gray-800/80 dark:border-gray-700/50">
+      <CardContent className="p-6">
+        <div className="flex flex-col lg:flex-row justify-between items-start gap-6">
+          <div className="flex-1 w-full">
+            {isEditing ? (
+              <div className="space-y-6">
+                {/* Weight Input */}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                  <span className="font-semibold text-gray-900 dark:text-gray-100 min-w-0 flex-shrink-0">{t("Weight")}:</span>
+                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <Input
+                      type="number"
+                      value={editForm.weight}
+                      onChange={(e) => setEditForm({ ...editForm, weight: e.target.value })}
+                      className="w-full sm:w-32 px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all duration-200 bg-white/50 backdrop-blur-sm text-gray-900 dark:bg-gray-800/50 dark:border-gray-600 dark:text-gray-100"
+                      min="0"
+                      step="0.01"
+                      autoFocus
+                    />
+                    <span className="text-gray-600 dark:text-gray-400 font-medium">g</span>
+                  </div>
+                </div>
+                
+                {/* Items Count (for bulk entries) */}
+                {editForm.isBulk && (
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                    <span className="font-semibold text-gray-900 dark:text-gray-100 min-w-0 flex-shrink-0">{t("Items")}:</span>
+                    <Input
+                      type="number"
+                      value={editForm.itemCount}
+                      onChange={(e) => setEditForm({ ...editForm, itemCount: e.target.value })}
+                      className="w-full sm:w-24 px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all duration-200 bg-white/50 backdrop-blur-sm text-gray-900 dark:bg-gray-800/50 dark:border-gray-600 dark:text-gray-100"
+                      min="1"
+                    />
+                  </div>
+                )}
+                
+                {/* Bulk Toggle */}
+                <div className="flex items-center space-x-4 p-4 bg-gray-50/50 dark:bg-gray-700/50 rounded-xl border border-gray-200/50 dark:border-gray-600/50">
+                  <button
+                    type="button"
+                    onClick={() => setEditForm({ ...editForm, isBulk: !editForm.isBulk })}
+                    className={`relative inline-flex h-7 w-12 items-center rounded-full transition-all duration-200 shadow-lg ${
+                      editForm.isBulk ? 'bg-gradient-to-r from-blue-600 to-blue-700' : 'bg-gray-300 dark:bg-gray-600'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition-transform duration-200 ${
+                        editForm.isBulk ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                  <label className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                    {editForm.isBulk ? t("Bulk Entry") : t("Single Entry")}
+                  </label>
+                </div>
+                
+                {/* Notes */}
+                <div className="space-y-3">
+                  <label className="text-sm font-medium text-gray-900 dark:text-gray-100">{t("Notes")}</label>
+                  <Textarea
+                    value={editForm.notes}
+                    onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                    placeholder={t("Enter notes...")}
+                    rows={3}
+                    className="resize-none w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all duration-200 bg-white/50 backdrop-blur-sm placeholder-gray-500 text-gray-900 dark:bg-gray-800/50 dark:border-gray-600 dark:text-gray-100 dark:placeholder-gray-400"
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* Entry Header */}
+                <div className="flex flex-wrap items-center gap-3 text-sm">
+                  <span className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-3 py-1 rounded-full font-semibold shadow-lg">
+                    {entry.metalType.toUpperCase()}
+                  </span>
+                  <span className="bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 px-3 py-1 rounded-full font-medium">
+                    {entry.category}
+                  </span>
+                  <span className="bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 px-3 py-1 rounded-full font-medium">
+                    {entry.purity}%
+                  </span>
+                </div>
+                
+                {/* Weight Information */}
+                <div className="bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-700/50 dark:to-gray-800/50 p-4 rounded-xl border border-gray-200/50 dark:border-gray-600/50 space-y-2">
+                  <p className="font-semibold text-gray-900 dark:text-gray-100">
+                    {t("Gross Weight")}: <span className="text-blue-600 dark:text-blue-400">{entry.weight}g</span>
+                  </p>
+                  <p className="font-semibold text-emerald-600 dark:text-emerald-400">
+                    {t("Pure Weight")}: <span className="text-emerald-700 dark:text-emerald-300">{(entry.weight * entry.purity / 100).toFixed(3)}g</span>
+                  </p>
+                </div>
+                
+                {/* Item Count (for bulk entries) */}
+                {entry.isBulk && (
+                  <div className="bg-amber-50 dark:bg-amber-900/20 p-3 rounded-xl border border-amber-200/50 dark:border-amber-800/50">
+                    <p className="font-semibold text-amber-800 dark:text-amber-200">
+                      {t("Items")}: <span className="text-amber-700 dark:text-amber-300">{entry.itemCount}</span>
+                    </p>
+                  </div>
+                )}
+                
+                {/* Notes */}
+                {entry.notes && (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{t("Notes")}:</p>
+                    <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-xl border-l-4 border-blue-500 dark:border-blue-400">
+                      <p className="text-sm text-gray-800 dark:text-gray-200 leading-relaxed">
+                        {entry.notes}
+                      </p>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Created Date */}
+                <div className="pt-2 border-t border-gray-200/50 dark:border-gray-700/50">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">
+                    {t("Created")}: {new Date(entry.createdAt).toLocaleDateString("en-GB")}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+          
+          {/* Action Buttons */}
+          <div className="flex flex-col items-end gap-4 w-full lg:w-auto">
+            {/* Entry Type Badge */}
+            <span className={`px-3 py-1 rounded-full text-xs font-medium border ${
+              entry.isBulk 
+                ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800' 
+                : 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-300 dark:border-emerald-800'
+            }`}>
+              {entry.isBulk ? t("Bulk") : t("Single")}
+            </span>
+            
+            {/* Action Buttons */}
+            <div className="flex gap-3 w-full lg:w-auto">
+              {isEditing ? (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleSaveEdit}
+                    disabled={isSubmitting || !editForm.weight || isNaN(editForm.weight) || Number(editForm.weight) <= 0}
+                    className="flex-1 lg:flex-none bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white font-medium px-4 py-2 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+                  >
+                    {isSubmitting ? t("Saving...") : t("Save")}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleCancelEdit}
+                    disabled={isSubmitting}
+                    className="flex-1 lg:flex-none bg-white border-2 border-gray-300 text-gray-700 hover:bg-gray-50 hover:border-gray-400 font-medium px-4 py-2 rounded-xl shadow-sm hover:shadow-md transition-all duration-200 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+                  >
+                    {t("Cancel")}
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleEdit(entry)}
+                    className="flex-1 lg:flex-none bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-medium px-4 py-2 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105"
+                  >
+                    {t("Edit")}
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => handleDelete(entryId)}
+                    className="flex-1 lg:flex-none bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-medium px-4 py-2 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105"
+                  >
+                    {t("Delete")}
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+
+  // return (
+  //   <div className="p-4 space-y-4">
+  //     {/* Header */}
+  //     <div className="flex justify-between items-center">
+  //       <h1 className="text-2xl font-bold">{t("All Entries")}</h1>
+  //       <div className="flex gap-2">
+  //         <Button
+  //           variant="outline"
+  //           onClick={() => setIsFilterOpen(true)}
+  //           className="flex items-center gap-2"
+  //         >
+  //           <Filter size={16} />
+  //           {t("Filter")}
+  //         </Button>
+          
+  //         {Object.keys(activeFilters).some(key => activeFilters[key]) && (
+  //           <Button
+  //             variant="outline"
+  //             onClick={handleClearFilter}
+  //             className="flex items-center gap-2"
+  //           >
+  //             <X size={16} />
+  //             {t("Clear Filter")}
+  //           </Button>
+  //         )}
+          
+  //         <Button
+  //           onClick={() => setIsAddModalOpen(true)}
+  //           className="flex items-center gap-2"
+  //         >
+  //           <Plus size={16} />
+  //           {t("Add Item")}
+  //         </Button>
+  //       </div>
+  //     </div>
+
+  //     {/* Active Filters Display */}
+  //     {Object.keys(activeFilters).some(key => activeFilters[key]) && (
+  //       <div className="flex items-center gap-2 text-sm">
+  //         <span className="font-medium">{t("Active Filters")}:</span>
+  //         {Object.entries(activeFilters).map(([key, value]) => (
+  //           value && (
+  //             <span key={key} className="bg-blue-100 text-blue-700 px-2 py-1 rounded">
+  //               {t(key)}: {value}
+  //             </span>
+  //           )
+  //         ))}
+  //       </div>
+  //     )}
+
+  //     {/* Entries List */}
+  //     {loading ? (
+  //       <div className="text-center py-8">
+  //         <p className="text-gray-500">{t("Loading entries...")}</p>
+  //       </div>
+  //     ) : (
+  //       <div className="space-y-3">
+  //         {filteredEntries.length === 0 ? (
+  //           <p className="text-sm text-muted-foreground text-center py-8">
+  //             {t("No entries found")}
+  //           </p>
+  //         ) : (
+  //           filteredEntries.map(renderEntryCard)
+  //         )}
+  //       </div>
+  //     )}
+
+  //     {/* Add Item Modal */}
+  //     <CustomModal
+  //       isOpen={isAddModalOpen}
+  //       onClose={handleCloseAddModal}
+  //       title={t("Add New Entry")}
+  //     >
+  //       <div className="space-y-4">
+  //         {/* Metal Type */}
+  //         <div className="space-y-2">
+  //           <label className="text-sm font-medium">{t("Metal Type")}</label>
+  //           <CustomSelect
+  //             value={addForm.metalType}
+  //             onValueChange={(value) => setAddForm({ ...addForm, metalType: value, category: "", purity: "" })}
+  //           >
+  //             <option value="gold">{t("Gold")}</option>
+  //             <option value="silver">{t("Silver")}</option>
+  //           </CustomSelect>
+  //         </div>
+
+  //         {/* Category */}
+  //         <div className="space-y-2">
+  //           <label className="text-sm font-medium">{t("Category")}</label>
+  //           <CustomSelect
+  //             value={addForm.category}
+  //             onValueChange={(value) => setAddForm({ ...addForm, category: value, purity: "" })}
+  //             disabled={!addForm.metalType}
+  //           >
+  //             <option value="">{t("Select Category")}</option>
+  //             {availableCategories.map(category => (
+  //               <option key={category} value={category}>{category}</option>
+  //             ))}
+  //           </CustomSelect>
+  //         </div>
+
+  //         {/* Purity */}
+  //         <div className="space-y-2">
+  //           <label className="text-sm font-medium">{t("Purity")} (%)</label>
+  //           <CustomSelect
+  //             value={addForm.purity}
+  //             onValueChange={(value) => setAddForm({ ...addForm, purity: value })}
+  //             disabled={!addForm.category}
+  //           >
+  //             <option value="">{t("Select Purity")}</option>
+  //             {availablePurities.map(purity => (
+  //               <option key={purity} value={purity}>{purity}%</option>
+  //             ))}
+  //           </CustomSelect>
+  //         </div>
+
+  //         {/* Weight */}
+  //         <div className="space-y-2">
+  //           <label className="text-sm font-medium">{t("Weight")} (g)</label>
+  //           <Input
+  //             type="number"
+  //             value={addForm.weight}
+  //             onChange={(e) => setAddForm({ ...addForm, weight: e.target.value })}
+  //             placeholder={t("Enter weight")}
+  //             min="0"
+  //             step="0.01"
+  //           />
+  //         </div>
+
+  //         {/* Bulk Toggle */}
+  //         <div className="flex items-center space-x-3">
+  //           <button
+  //             type="button"
+  //             onClick={() => setAddForm({ ...addForm, isBulk: !addForm.isBulk })}
+  //             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+  //               addForm.isBulk ? 'bg-blue-600' : 'bg-gray-200'
+  //             }`}
+  //           >
+  //             <span
+  //               className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+  //                 addForm.isBulk ? 'translate-x-6' : 'translate-x-1'
+  //               }`}
+  //             />
+  //           </button>
+  //           <label className="text-sm font-medium">
+  //             {addForm.isBulk ? t("Bulk Entry") : t("Single Entry")}
+  //           </label>
+  //         </div>
+
+  //         {/* Item Count (for bulk) */}
+  //         {addForm.isBulk && (
+  //           <div className="space-y-2">
+  //             <label className="text-sm font-medium">{t("Number of Items")}</label>
+  //             <Input
+  //               type="number"
+  //               value={addForm.itemCount}
+  //               onChange={(e) => setAddForm({ ...addForm, itemCount: e.target.value })}
+  //               placeholder={t("Enter number of items")}
+  //               min="1"
+  //             />
+  //           </div>
+  //         )}
+
+  //         {/* Notes */}
+  //         <div className="space-y-2">
+  //           <label className="text-sm font-medium">{t("Notes")} ({t("Optional")})</label>
+  //           <Textarea
+  //             value={addForm.notes}
+  //             onChange={(e) => setAddForm({ ...addForm, notes: e.target.value })}
+  //             placeholder={t("Enter notes about this item...")}
+  //             rows={3}
+  //             className="resize-none"
+  //           />
+  //         </div>
+
+  //         {/* Action Buttons */}
+  //         <div className="flex justify-end space-x-2 pt-4">
+  //           <Button
+  //             variant="outline"
+  //             onClick={handleCloseAddModal}
+  //             disabled={isSubmitting}
+  //           >
+  //             {t("Cancel")}
+  //           </Button>
+  //           <Button
+  //             onClick={handleAddItem}
+  //             disabled={
+  //               isSubmitting ||
+  //               !addForm.metalType ||
+  //               !addForm.category ||
+  //               !addForm.purity ||
+  //               !addForm.weight ||
+  //               isNaN(addForm.weight) ||
+  //               Number(addForm.weight) <= 0 ||
+  //               (addForm.isBulk && (!addForm.itemCount || isNaN(addForm.itemCount) || Number(addForm.itemCount) <= 0))
+  //             }
+  //           >
+  //             {isSubmitting ? t("Adding...") : t("Add Entry")}
+  //           </Button>
+  //         </div>
+  //       </div>
+  //     </CustomModal>
+
+  //     {/* Filter Modal */}
+  //     <CustomModal
+  //       isOpen={isFilterOpen}
+  //       onClose={() => setIsFilterOpen(false)}
+  //       title={t("Filter Entries")}
+  //     >
+  //       <div className="space-y-4">
+  //         {/* Keyword Search */}
+  //         <div className="space-y-2">
+  //           <label className="text-sm font-medium">{t("Keyword")} ({t("Search in notes")})</label>
+  //           <Input
+  //             type="text"
+  //             value={filters.keyword}
+  //             onChange={(e) => setFilters({ ...filters, keyword: e.target.value })}
+  //             placeholder={t("Enter keyword")}
+  //           />
+  //         </div>
+
+  //         {/* Metal Type */}
+  //         <div className="space-y-2">
+  //           <label className="text-sm font-medium">{t("Metal Type")}</label>
+  //           <CustomSelect
+  //             value={filters.metalType}
+  //             onValueChange={(value) => setFilters({ ...filters, metalType: value, category: "", purity: "" })}
+  //           >
+  //             <option value="">{t("All Metals")}</option>
+  //             <option value="gold">{t("Gold")}</option>
+  //             <option value="silver">{t("Silver")}</option>
+  //           </CustomSelect>
+  //         </div>
+
+  //         {/* Category */}
+  //         <div className="space-y-2">
+  //           <label className="text-sm font-medium">{t("Category")}</label>
+  //           <CustomSelect
+  //             value={filters.category}
+  //             onValueChange={(value) => setFilters({ ...filters, category: value, purity: "" })}
+  //             disabled={!filters.metalType}
+  //           >
+  //             <option value="">{t("All Categories")}</option>
+  //             {getFilterCategories().map(category => (
+  //               <option key={category} value={category}>{category}</option>
+  //             ))}
+  //           </CustomSelect>
+  //         </div>
+
+  //         {/* Purity */}
+  //         <div className="space-y-2">
+  //           <label className="text-sm font-medium">{t("Purity")} (%)</label>
+  //           <CustomSelect
+  //             value={filters.purity}
+  //             onValueChange={(value) => setFilters({ ...filters, purity: value })}
+  //             disabled={!filters.category}
+  //           >
+  //             <option value="">{t("All Purities")}</option>
+  //             {getFilterPurities().map(purity => (
+  //               <option key={purity} value={purity}>{purity}%</option>
+  //             ))}
+  //           </CustomSelect>
+  //         </div>
+
+  //         {/* Weight Range */}
+  //         {/* <div className="space-y-2">
+  //           <label className="text-sm font-medium">{t("Weight Range")} (g)</label>
+  //           <div className="flex gap-2">
+  //             <Input
+  //               type="number"
+  //               value={filters.minWeight}
+  //               onChange={(e) => setFilters({ ...filters, minWeight: e.target.value })}
+  //               placeholder={t("Min")}
+  //               min="0"
+  //               step="0.01"
+  //             />
+  //             <Input
+  //               type="number"
+  //               value={filters.maxWeight}
+  //               onChange={(e) => setFilters({ ...filters, maxWeight: e.target.value })}
+  //               placeholder={t("Max")}
+  //               min="0"
+  //               step="0.01"
+  //             />
+  //           </div>
+  //         </div> */}
+  //         {/* Weight Range */}
+  //         <div className="space-y-2">
+  //           <label className="text-sm font-medium">{t("Weight Range")} (g)</label>
+  //           <div className="flex gap-2">
+  //             <Input
+  //               type="number"
+  //               value={filters.minWeight}
+  //               onChange={(e) => setFilters({ ...filters, minWeight: e.target.value })}
+  //               placeholder={t("Min")}
+  //               min="0"
+  //               step="0.01"
+  //               disabled={!filters.metalType}
+  //             />
+  //             <Input
+  //               type="number"
+  //               value={filters.maxWeight}
+  //               onChange={(e) => setFilters({ ...filters, maxWeight: e.target.value })}
+  //               placeholder={t("Max")}
+  //               min="0"
+  //               step="0.01"
+  //               disabled={!filters.metalType}
+  //             />
+  //           </div>
+  //           {/* Add this note */}
+  //           {!filters.metalType && (
+  //             <p className="text-xs text-gray-500">{t("Select a metal type to enable weight filtering")}</p>
+  //           )}
+  //         </div>
+
+  //         {/* Weight Type Toggle - ADD THIS NEW SECTION */}
+  //         {(filters.minWeight || filters.maxWeight) && (
+  //           <div className="space-y-2">
+  //             <label className="text-sm font-medium">{t("Weight Type")}</label>
+  //             <div className="flex items-center space-x-3">
+  //               <button
+  //                 type="button"
+  //                 onClick={() => setFilters({ ...filters, useGrossWeight: !filters.useGrossWeight })}
+  //                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+  //                   filters.useGrossWeight ? 'bg-blue-600' : 'bg-gray-200'
+  //                 }`}
+  //               >
+  //                 <span
+  //                   className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+  //                     filters.useGrossWeight ? 'translate-x-6' : 'translate-x-1'
+  //                   }`}
+  //                 />
+  //               </button>
+  //               <label className="text-sm font-medium">
+  //                 {filters.useGrossWeight ? t("Gross Weight") : t("Pure Weight")}
+  //               </label>
+  //             </div>
+  //           </div>
+  //         )}
+
+  //         {/* Action Buttons */}
+  //         <div className="flex justify-end space-x-2 pt-4">
+  //           <Button
+  //             variant="outline"
+  //             onClick={() => setIsFilterOpen(false)}
+  //           >
+  //             {t("Cancel")}
+  //           </Button>
+  //           <Button onClick={handleApplyFilter}>
+  //             {t("Apply Filter")}
+  //           </Button>
+  //         </div>
+  //       </div>
+  //     </CustomModal>
+  //   </div>
+  // );
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-4 md:p-6 lg:p-8">
+      <div className="max-w-7xl mx-auto space-y-6">
+        {/* Header */}
+        <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-xl border border-gray-200/50 p-6 hover:shadow-2xl transition-all duration-300 dark:bg-gray-800/80 dark:border-gray-700/50">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
+            <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-blue-700 bg-clip-text text-transparent dark:from-blue-400 dark:to-blue-500">
+              {t("All Entries")}
+            </h1>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => setIsFilterOpen(true)}
+                className="bg-white border-2 border-gray-300 text-gray-700 hover:bg-gray-50 hover:border-gray-400 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-600 font-medium px-4 py-2.5 rounded-xl shadow-sm hover:shadow-md transition-all duration-200 flex items-center gap-2 min-h-[44px]"
+              >
+                <Filter size={16} />
+                {t("Filter")}
+              </button>
+              
+              {Object.keys(activeFilters).some(key => activeFilters[key]) && (
+                <button
+                  onClick={handleClearFilter}
+                  className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-medium px-4 py-2.5 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 flex items-center gap-2 min-h-[44px]"
+                >
+                  <X size={16} />
+                  {t("Clear Filter")}
+                </button>
+              )}
+              
+              <button
+                onClick={() => setIsAddModalOpen(true)}
+                className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-medium px-4 py-2.5 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 flex items-center gap-2 min-h-[44px]"
+              >
+                <Plus size={16} />
+                {t("Add Item")}
+              </button>
+            </div>
+          </div>
+        </div>
+  
+        {/* Active Filters Display */}
+        {Object.keys(activeFilters).some(key => activeFilters[key]) && (
+          <div className="bg-blue-50/80 backdrop-blur-sm rounded-2xl shadow-md border border-blue-200/50 p-4 dark:bg-blue-900/20 dark:border-blue-700/50">
+            <div className="flex flex-wrap items-center gap-3 text-sm">
+              <span className="font-semibold text-blue-900 dark:text-blue-200">{t("Active Filters")}:</span>
+              {Object.entries(activeFilters).map(([key, value]) => (
+                value && (
+                  <span key={key} className="bg-gradient-to-r from-blue-500 to-blue-600 text-white px-3 py-1.5 rounded-full font-medium shadow-sm">
+                    {t(key)}: {value}
+                  </span>
+                )
+              ))}
+            </div>
+          </div>
+        )}
+  
+        {/* Entries List */}
+        {loading ? (
+          <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-xl border border-gray-200/50 p-12 text-center dark:bg-gray-800/80 dark:border-gray-700/50">
+            <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-600 border-t-transparent mx-auto mb-4"></div>
+            <p className="text-gray-600 dark:text-gray-400 text-lg font-medium">{t("Loading entries...")}</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {filteredEntries.length === 0 ? (
+              <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-xl border border-gray-200/50 p-12 text-center dark:bg-gray-800/80 dark:border-gray-700/50">
+                <div className="text-gray-400 mb-4">
+                  <svg className="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2M4 13h2m0 0V9a2 2 0 012-2h2m0 0V6a2 2 0 012-2h2a2 2 0 012 2v1M6 13h2" />
+                  </svg>
+                </div>
+                <p className="text-gray-600 dark:text-gray-400 text-lg font-medium">{t("No entries found")}</p>
+              </div>
+            ) : (
+              filteredEntries.map(renderEntryCard)
+            )}
+          </div>
+        )}
+  
+        {/* Add Item Modal */}
+        <div className={`fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 transition-all duration-300 ${isAddModalOpen ? 'opacity-100 visible' : 'opacity-0 invisible'}`}>
+          <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-gray-200/50 p-6 max-w-md w-full max-h-[90vh] overflow-y-auto dark:bg-gray-800/95 dark:border-gray-700/50 transform transition-all duration-300">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-blue-700 bg-clip-text text-transparent dark:from-blue-400 dark:to-blue-500">
+                {t("Add New Entry")}
+              </h3>
+              <button
+                onClick={handleCloseAddModal}
+                className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors duration-200"
+              >
+                <X size={24} />
+              </button>
+            </div>
+  
+            <div className="space-y-6">
+              {/* Metal Type */}
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-gray-700 dark:text-gray-300">{t("Metal Type")}</label>
+                <select
+                  value={addForm.metalType}
+                  onChange={(e) => setAddForm({ ...addForm, metalType: e.target.value, category: "", purity: "" })}
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all duration-200 bg-white/50 backdrop-blur-sm text-gray-900 dark:bg-gray-700/50 dark:border-gray-600 dark:text-gray-100 min-h-[48px]"
+                >
+                  <option value="gold">{t("Gold")}</option>
+                  <option value="silver">{t("Silver")}</option>
+                </select>
+              </div>
+  
+              {/* Category */}
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-gray-700 dark:text-gray-300">{t("Category")}</label>
+                <select
+                  value={addForm.category}
+                  onChange={(e) => setAddForm({ ...addForm, category: e.target.value, purity: "" })}
+                  disabled={!addForm.metalType}
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all duration-200 bg-white/50 backdrop-blur-sm text-gray-900 dark:bg-gray-700/50 dark:border-gray-600 dark:text-gray-100 disabled:opacity-50 disabled:cursor-not-allowed min-h-[48px]"
+                >
+                  <option value="">{t("Select Category")}</option>
+                  {availableCategories.map(category => (
+                    <option key={category} value={category}>{category}</option>
+                  ))}
+                </select>
+              </div>
+  
+              {/* Purity */}
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-gray-700 dark:text-gray-300">{t("Purity")} (%)</label>
+                <select
+                  value={addForm.purity}
+                  onChange={(e) => setAddForm({ ...addForm, purity: e.target.value })}
+                  disabled={!addForm.category}
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all duration-200 bg-white/50 backdrop-blur-sm text-gray-900 dark:bg-gray-700/50 dark:border-gray-600 dark:text-gray-100 disabled:opacity-50 disabled:cursor-not-allowed min-h-[48px]"
+                >
+                  <option value="">{t("Select Purity")}</option>
+                  {availablePurities.map(purity => (
+                    <option key={purity} value={purity}>{purity}%</option>
+                  ))}
+                </select>
+              </div>
+  
+              {/* Weight */}
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-gray-700 dark:text-gray-300">{t("Weight")} (g)</label>
+                <input
+                  type="number"
+                  value={addForm.weight}
+                  onChange={(e) => setAddForm({ ...addForm, weight: e.target.value })}
+                  placeholder={t("Enter weight")}
+                  min="0"
+                  step="0.01"
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all duration-200 bg-white/50 backdrop-blur-sm placeholder-gray-500 text-gray-900 dark:bg-gray-700/50 dark:border-gray-600 dark:text-gray-100 dark:placeholder-gray-400 min-h-[48px]"
+                />
+              </div>
+  
+              {/* Bulk Toggle */}
+              <div className="flex items-center justify-between p-4 bg-gray-50/50 rounded-xl border border-gray-200/50 dark:bg-gray-700/50 dark:border-gray-600/50">
+                <div className="flex items-center space-x-3">
+                  <button
+                    type="button"
+                    onClick={() => setAddForm({ ...addForm, isBulk: !addForm.isBulk })}
+                    className={`relative inline-flex h-7 w-12 items-center rounded-full transition-all duration-200 ${
+                      addForm.isBulk ? 'bg-gradient-to-r from-blue-500 to-blue-600 shadow-lg' : 'bg-gray-300 dark:bg-gray-600'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-lg transition-transform duration-200 ${
+                        addForm.isBulk ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                  <label className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                    {addForm.isBulk ? t("Bulk Entry") : t("Single Entry")}
+                  </label>
+                </div>
+              </div>
+  
+              {/* Item Count (for bulk) */}
+              {addForm.isBulk && (
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-gray-700 dark:text-gray-300">{t("Number of Items")}</label>
+                  <input
+                    type="number"
+                    value={addForm.itemCount}
+                    onChange={(e) => setAddForm({ ...addForm, itemCount: e.target.value })}
+                    placeholder={t("Enter number of items")}
+                    min="1"
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all duration-200 bg-white/50 backdrop-blur-sm placeholder-gray-500 text-gray-900 dark:bg-gray-700/50 dark:border-gray-600 dark:text-gray-100 dark:placeholder-gray-400 min-h-[48px]"
+                  />
+                </div>
+              )}
+  
+              {/* Notes */}
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-gray-700 dark:text-gray-300">{t("Notes")} ({t("Optional")})</label>
+                <textarea
+                  value={addForm.notes}
+                  onChange={(e) => setAddForm({ ...addForm, notes: e.target.value })}
+                  placeholder={t("Enter notes about this item...")}
+                  rows={3}
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all duration-200 bg-white/50 backdrop-blur-sm placeholder-gray-500 text-gray-900 dark:bg-gray-700/50 dark:border-gray-600 dark:text-gray-100 dark:placeholder-gray-400 resize-none"
+                />
+              </div>
+  
+              {/* Action Buttons */}
+              <div className="flex flex-col sm:flex-row justify-end gap-3 pt-6 border-t border-gray-200/50 dark:border-gray-600/50">
+                <button
+                  onClick={handleCloseAddModal}
+                  disabled={isSubmitting}
+                  className="bg-white border-2 border-gray-300 text-gray-700 hover:bg-gray-50 hover:border-gray-400 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-600 font-medium px-6 py-3 rounded-xl shadow-sm hover:shadow-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed min-h-[48px]"
+                >
+                  {t("Cancel")}
+                </button>
+                <button
+                  onClick={handleAddItem}
+                  disabled={
+                    isSubmitting ||
+                    !addForm.metalType ||
+                    !addForm.category ||
+                    !addForm.purity ||
+                    !addForm.weight ||
+                    isNaN(addForm.weight) ||
+                    Number(addForm.weight) <= 0 ||
+                    (addForm.isBulk && (!addForm.itemCount || isNaN(addForm.itemCount) || Number(addForm.itemCount) <= 0))
+                  }
+                  className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-medium px-6 py-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none min-h-[48px]"
+                >
+                  {isSubmitting ? t("Adding...") : t("Add Entry")}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+  
+        {/* Filter Modal */}
+        <div className={`fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 transition-all duration-300 ${isFilterOpen ? 'opacity-100 visible' : 'opacity-0 invisible'}`}>
+          <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-gray-200/50 p-6 max-w-md w-full max-h-[90vh] overflow-y-auto dark:bg-gray-800/95 dark:border-gray-700/50 transform transition-all duration-300">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-blue-700 bg-clip-text text-transparent dark:from-blue-400 dark:to-blue-500">
+                {t("Filter Entries")}
+              </h3>
+              <button
+                onClick={() => setIsFilterOpen(false)}
+                className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors duration-200"
+              >
+                <X size={24} />
+              </button>
+            </div>
+  
+            <div className="space-y-6">
+              {/* Keyword Search */}
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-gray-700 dark:text-gray-300">{t("Keyword")} ({t("Search in notes")})</label>
+                <input
+                  type="text"
+                  value={filters.keyword}
+                  onChange={(e) => setFilters({ ...filters, keyword: e.target.value })}
+                  placeholder={t("Enter keyword")}
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all duration-200 bg-white/50 backdrop-blur-sm placeholder-gray-500 text-gray-900 dark:bg-gray-700/50 dark:border-gray-600 dark:text-gray-100 dark:placeholder-gray-400 min-h-[48px]"
+                />
+              </div>
+  
+              {/* Metal Type */}
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-gray-700 dark:text-gray-300">{t("Metal Type")}</label>
+                <select
+                  value={filters.metalType}
+                  onChange={(e) => setFilters({ ...filters, metalType: e.target.value, category: "", purity: "" })}
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all duration-200 bg-white/50 backdrop-blur-sm text-gray-900 dark:bg-gray-700/50 dark:border-gray-600 dark:text-gray-100 min-h-[48px]"
+                >
+                  <option value="">{t("All Metals")}</option>
+                  <option value="gold">{t("Gold")}</option>
+                  <option value="silver">{t("Silver")}</option>
+                </select>
+              </div>
+  
+              {/* Category */}
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-gray-700 dark:text-gray-300">{t("Category")}</label>
+                <select
+                  value={filters.category}
+                  onChange={(e) => setFilters({ ...filters, category: e.target.value, purity: "" })}
+                  disabled={!filters.metalType}
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all duration-200 bg-white/50 backdrop-blur-sm text-gray-900 dark:bg-gray-700/50 dark:border-gray-600 dark:text-gray-100 disabled:opacity-50 disabled:cursor-not-allowed min-h-[48px]"
+                >
+                  <option value="">{t("All Categories")}</option>
+                  {getFilterCategories().map(category => (
+                    <option key={category} value={category}>{category}</option>
+                  ))}
+                </select>
+              </div>
+  
+              {/* Purity */}
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-gray-700 dark:text-gray-300">{t("Purity")} (%)</label>
+                <select
+                  value={filters.purity}
+                  onChange={(e) => setFilters({ ...filters, purity: e.target.value })}
+                  disabled={!filters.category}
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all duration-200 bg-white/50 backdrop-blur-sm text-gray-900 dark:bg-gray-700/50 dark:border-gray-600 dark:text-gray-100 disabled:opacity-50 disabled:cursor-not-allowed min-h-[48px]"
+                >
+                  <option value="">{t("All Purities")}</option>
+                  {getFilterPurities().map(purity => (
+                    <option key={purity} value={purity}>{purity}%</option>
+                  ))}
+                </select>
+              </div>
+  
+              {/* Weight Range */}
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-gray-700 dark:text-gray-300">{t("Weight Range")} (g)</label>
+                <div className="flex gap-3">
+                  <input
+                    type="number"
+                    value={filters.minWeight}
+                    onChange={(e) => setFilters({ ...filters, minWeight: e.target.value })}
+                    placeholder={t("Min")}
+                    min="0"
+                    step="0.01"
+                    disabled={!filters.metalType}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all duration-200 bg-white/50 backdrop-blur-sm placeholder-gray-500 text-gray-900 dark:bg-gray-700/50 dark:border-gray-600 dark:text-gray-100 dark:placeholder-gray-400 disabled:opacity-50 disabled:cursor-not-allowed min-h-[48px]"
+                  />
+                  <input
+                    type="number"
+                    value={filters.maxWeight}
+                    onChange={(e) => setFilters({ ...filters, maxWeight: e.target.value })}
+                    placeholder={t("Max")}
+                    min="0"
+                    step="0.01"
+                    disabled={!filters.metalType}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all duration-200 bg-white/50 backdrop-blur-sm placeholder-gray-500 text-gray-900 dark:bg-gray-700/50 dark:border-gray-600 dark:text-gray-100 dark:placeholder-gray-400 disabled:opacity-50 disabled:cursor-not-allowed min-h-[48px]"
+                  />
+                </div>
+                {!filters.metalType && (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{t("Select a metal type to enable weight filtering")}</p>
+                )}
+              </div>
+  
+              {/* Weight Type Toggle */}
+              {(filters.minWeight || filters.maxWeight) && (
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-gray-700 dark:text-gray-300">{t("Weight Type")}</label>
+                  <div className="flex items-center justify-between p-4 bg-gray-50/50 rounded-xl border border-gray-200/50 dark:bg-gray-700/50 dark:border-gray-600/50">
+                    <div className="flex items-center space-x-3">
+                      <button
+                        type="button"
+                        onClick={() => setFilters({ ...filters, useGrossWeight: !filters.useGrossWeight })}
+                        className={`relative inline-flex h-7 w-12 items-center rounded-full transition-all duration-200 ${
+                          filters.useGrossWeight ? 'bg-gradient-to-r from-blue-500 to-blue-600 shadow-lg' : 'bg-gray-300 dark:bg-gray-600'
+                        }`}
+                      >
+                        <span
+                          className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-lg transition-transform duration-200 ${
+                            filters.useGrossWeight ? 'translate-x-6' : 'translate-x-1'
+                          }`}
+                        />
+                      </button>
+                      <label className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                        {filters.useGrossWeight ? t("Gross Weight") : t("Pure Weight")}
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              )}
+  
+              {/* Action Buttons */}
+              <div className="flex flex-col sm:flex-row justify-end gap-3 pt-6 border-t border-gray-200/50 dark:border-gray-600/50">
+                <button
+                  onClick={() => setIsFilterOpen(false)}
+                  className="bg-white border-2 border-gray-300 text-gray-700 hover:bg-gray-50 hover:border-gray-400 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-600 font-medium px-6 py-3 rounded-xl shadow-sm hover:shadow-md transition-all duration-200 min-h-[48px]"
+                >
+                  {t("Cancel")}
+                </button>
+                <button
+                  onClick={handleApplyFilter}
+                  className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-medium px-6 py-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 min-h-[48px]"
+                >
+                  {t("Apply Filter")}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+

@@ -1,0 +1,77 @@
+JEWELLERY-STOCK-MANAGEMENT-APP/
+├── backend/
+│   ├── middleware/
+│   │   └── requireAuth.js
+│   ├── models/
+│   │   ├── Entry.js
+│   │   ├── Metadata.js
+│   │   ├── Sales.js
+│   │   └── User.js
+│   ├── node_modules/
+│   ├── routes/
+│   │   ├── auth.js
+│   │   ├── config.js
+│   │   ├── entries.js
+│   │   ├── metadata.js
+│   │   ├── reports.js
+│   │   ├── sales.js
+│   │   └── users.js
+│   ├── utils/
+│   │   ├── authMiddleware.js
+│   │   └── encrypt.js
+│   ├── .env
+│   ├── index.js
+│   ├── package-lock.json
+│   └── package.json
+│
+├── frontend/
+│   ├── node_modules/
+│   ├── public/
+│   │   └── vite.svg
+│   ├── src/
+│   │   ├── assets/
+│   │   │   └── react.svg
+│   │   ├── components/
+│   │   │   └── ui/
+│   │   │       ├── BackButton.jsx
+│   │   │       ├── button.jsx
+│   │   │       ├── card.jsx
+│   │   │       ├── input.jsx
+│   │   │       ├── LanguageSwitcher.jsx
+│   │   │       ├── modal.jsx
+│   │   │       ├── select.jsx
+│   │   │       └── textarea.jsx
+│   │   ├── context/
+│   │   │   └── AuthContext.jsx
+│   │   ├── i18n/
+│   │   │   ├── index.js
+│   │   │   └── resources.js
+│   │   ├── lib/
+│   │   │   └── utils.js
+│   │   ├── pages/
+│   │   │   ├── CategoryPage.jsx
+│   │   │   ├── Entries.jsx
+│   │   │   ├── EntryPage.jsx
+│   │   │   ├── Home.jsx
+│   │   │   ├── Login.jsx
+│   │   │   ├── PurityPage.jsx
+│   │   │   ├── ReportPage.jsx
+│   │   │   └── SalesPage.jsx
+│   │   ├── router/
+│   │   │   └── index.jsx
+│   │   ├── App.css
+│   │   ├── App.jsx
+│   │   ├── index.css
+│   │   └── main.jsx
+│   ├── .env
+│   ├── .gitignore
+│   ├── components.json
+│   ├── eslint.config.js
+│   ├── index.html
+│   ├── jsconfig.json
+│   ├── package-lock.json
+│   ├── package.json
+│   ├── postcss.config.js
+│   ├── README.md
+│   ├── tailwind.config.js
+│   └── vite.config.js
