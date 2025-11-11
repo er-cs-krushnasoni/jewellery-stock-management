@@ -1,4 +1,7 @@
 JEWELLERY-STOCK-MANAGEMENT-APP/
+|
+├── .gitignore
+|
 ├── backend/
 │   ├── middleware/
 │   │   └── requireAuth.js
@@ -64,7 +67,6 @@ JEWELLERY-STOCK-MANAGEMENT-APP/
 │   │   ├── index.css
 │   │   └── main.jsx
 │   ├── .env
-│   ├── .gitignore
 │   ├── components.json
 │   ├── eslint.config.js
 │   ├── index.html
