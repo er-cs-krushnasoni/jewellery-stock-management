@@ -1,7 +1,7 @@
 // src/pages/Login.jsx
 import React, { useState } from "react";
 import { useAuth } from "../context/AuthContext";
-import axios from "axios";
+import { api } from "../config/api"; // ← CHANGED: Import centralized API
 
 export default function Login() {
   const [username, setUsername] = useState("");
@@ -16,10 +16,10 @@ export default function Login() {
     setError("");
 
     try {
-      const response = await axios.post(
-        `${import.meta.env.VITE_API_BASE_URL}/api/auth/login`,
-        { username: username.trim(), password }, // Trim username before sending
-        { withCredentials: true }
+      // ← CHANGED: Use api instance instead of axios directly
+      const response = await api.post(
+        '/api/auth/login',
+        { username: username.trim(), password }
       );
 
       if (response.data.token) {
@@ -33,7 +33,6 @@ export default function Login() {
   };
 
   const handleUsernameChange = (e) => {
-    // Remove leading and trailing spaces automatically
     const trimmedValue = e.target.value.trim();
     setUsername(trimmedValue);
   };
@@ -48,12 +47,10 @@ export default function Login() {
         onSubmit={handleLogin}
         className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-xl border border-gray-200/50 p-8 space-y-6 w-full max-w-md hover:shadow-2xl transition-all duration-300 dark:bg-gray-800/80 dark:border-gray-700/50"
       >
-        {/* Modern heading with better typography */}
         <h2 className="text-3xl font-bold text-center text-gray-900 dark:text-gray-100">
           Welcome Back
         </h2>
 
-        {/* Username field with automatic trimming */}
         <div className="space-y-2">
           <label className="block font-medium text-gray-700 dark:text-gray-300">
             Username
@@ -64,11 +61,11 @@ export default function Login() {
             onChange={handleUsernameChange}
             className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all duration-200 bg-white/50 backdrop-blur-sm placeholder-gray-500 text-gray-900 dark:bg-gray-800/50 dark:border-gray-600 dark:text-gray-100 dark:placeholder-gray-400"
             placeholder="Enter your username"
+            autoComplete="current-password" 
             required
           />
         </div>
 
-        {/* Password field with visibility toggle */}
         <div className="space-y-2">
           <label className="block font-medium text-gray-700 dark:text-gray-300">
             Password
@@ -80,6 +77,7 @@ export default function Login() {
               onChange={(e) => setPassword(e.target.value)}
               className="w-full px-4 py-3 pr-12 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all duration-200 bg-white/50 backdrop-blur-sm placeholder-gray-500 text-gray-900 dark:bg-gray-800/50 dark:border-gray-600 dark:text-gray-100 dark:placeholder-gray-400"
               placeholder="Enter your password"
+              autoComplete="current-password" 
               required
             />
             <button
@@ -101,7 +99,6 @@ export default function Login() {
           </div>
         </div>
 
-        {/* Modern error message with better styling */}
         {error && (
           <div className="bg-red-50 border-2 border-red-200 rounded-xl p-3 dark:bg-red-900/20 dark:border-red-800/50">
             <p className="text-red-600 text-sm text-center font-medium dark:text-red-400">
@@ -110,7 +107,6 @@ export default function Login() {
           </div>
         )}
 
-        {/* Modern button with gradient and hover effects */}
         <button
           type="submit"
           className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-medium py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 focus:ring-4 focus:ring-blue-500/20 dark:from-blue-500 dark:to-blue-600 dark:hover:from-blue-600 dark:hover:to-blue-700"

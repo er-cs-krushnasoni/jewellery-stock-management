@@ -1,6 +1,7 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import axios from "axios";
+import { api } from "../config/api";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -37,7 +38,7 @@ export default function PurityPage() {
   const fetchPurities = async () => {
     try {
       const token = localStorage.getItem("token");
-      const res = await axios.get(`${import.meta.env.VITE_API_BASE_URL}/api/metadata`, {
+      const res = await api.get(`/api/metadata`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = res.data;
@@ -107,8 +108,8 @@ export default function PurityPage() {
         return;
       }
       const token = localStorage.getItem("token");
-      await axios.post(
-        `${import.meta.env.VITE_API_BASE_URL}/api/config/purities`,
+      await api.post(
+        `/api/config/purities`,
         {
           metalType: metal,
           category,
@@ -144,8 +145,8 @@ export default function PurityPage() {
         oldPurity: oldPurityValue,
         newPurity: newPurityValue
       });
-      await axios.post(
-        `${import.meta.env.VITE_API_BASE_URL}/api/config/purities/update`,
+      await api.post(
+        `/api/config/purities/update`,
         {
           metalType: metal,
           categoryName: category,
@@ -176,8 +177,8 @@ export default function PurityPage() {
         categoryName: category,
         purity: purityValue
       });
-      await axios.delete(
-        `${import.meta.env.VITE_API_BASE_URL}/api/config/purities`,
+      await api.delete(
+        `/api/config/purities`,
         {
           headers: { Authorization: `Bearer ${token}` },
           data: {
@@ -274,7 +275,7 @@ export default function PurityPage() {
       
       console.log("🎯 Adding item:", entryData);
       
-      const response = await axios.post(
+      const response = await api.post(
         `${import.meta.env.VITE_API_BASE_URL}/api/entries`,
         entryData,
         {
@@ -313,368 +314,6 @@ export default function PurityPage() {
     }
     setIsAddItemOpen(true);
   };
-  
-  // return (
-  //   <div className="p-4 space-y-4">
-  //     <BackButton to={`/${metal}`} label={t("Back to Categories")} />
-  //     <div className="flex items-center justify-between">
-  //       <h1 className="text-xl font-bold capitalize">
-  //         {metal} / {category} — {t("Purities")}
-  //       </h1>
-  //       <div className="flex gap-2">
-  //         <Button
-  //           onClick={openAddItemModal}
-  //           variant="default"
-  //           size="sm"
-  //           className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white"
-  //           disabled={purities.length === 0}
-  //         >
-  //           <Package size={16} />
-  //           {t("Add Item")}
-  //         </Button>
-  //         <Button
-  //           onClick={() => setIsConfigOpen(true)}
-  //           variant="outline"
-  //           size="sm"
-  //           className="flex items-center gap-2"
-  //         >
-  //           <Settings size={16} />
-  //           {t("Config")}
-  //         </Button>
-  //       </div>
-  //     </div>
-
-  //     {loading ? (
-  //       <div className="text-center py-8">
-  //         <p className="text-gray-500">{t("Loading purities...")}</p>
-  //       </div>
-  //     ) : purities.length === 0 ? (
-  //       <div className="text-center py-8">
-  //         <p className="text-muted-foreground">{t("No purities available.")}</p>
-  //         <p className="text-sm text-gray-500 mt-2">
-  //           {t("Use the Config button to add purity levels first")}
-  //         </p>
-  //       </div>
-  //     ) : (
-  //       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-  //         {purities.map((p) => (
-  //           <div
-  //             key={p.purity}
-  //             onClick={() => {
-  //               console.log(`Clicking on ${p.purity}% purity`);
-  //               handleClick(p.purity);
-  //             }}
-  //             className="cursor-pointer"
-  //           >
-  //             <Card className="shadow-md hover:shadow-lg transition rounded-2xl h-full">
-  //               <CardContent className="p-4">
-  //                 <div className="text-lg font-semibold">
-  //                   {p.purity}% {t("Purity")}
-  //                 </div>
-  //                 <div className="text-sm mt-1">
-  //                   {t("Gross Weight")}: {p.grossWeight.toFixed(2)}g
-  //                 </div>
-  //                 <div className="text-sm">
-  //                   {t("Pure Weight")}: {p.pureWeight.toFixed(2)}g
-  //                 </div>
-  //                 <div className="text-sm">
-  //                   {t("Total Items")}: {p.totalItems}
-  //                 </div>
-  //               </CardContent>
-  //             </Card>
-  //           </div>
-  //         ))}
-  //       </div>
-  //     )}
-
-  //     {/* Add Item Modal */}
-  //     <Modal
-  //       isOpen={isAddItemOpen}
-  //       onClose={() => {
-  //         setIsAddItemOpen(false);
-  //         resetAddItemForm(); // Reset form when closing modal
-  //       }}
-  //       title={t("Add New Item")}
-  //     >
-  //       <div className="space-y-4">
-  //         {/* Weight Input */}
-  //         <div>
-  //           <label className="block text-sm font-medium mb-1">
-  //             {t("Weight")} (g) <span className="text-red-500">*</span>
-  //           </label>
-  //           <Input
-  //             type="number"
-  //             placeholder={t("Enter weight in grams")}
-  //             value={addItemForm.weight}
-  //             onChange={(e) => handleAddItemFormChange('weight', e.target.value)}
-  //             min="0"
-  //             step="0.01"
-  //             required
-  //           />
-  //         </div>
-
-  //         {/* Purity Selection */}
-  //         <div>
-  //           <label className="block text-sm font-medium mb-1">
-  //             {t("Purity")} <span className="text-red-500">*</span>
-  //           </label>
-  //           <select
-  //             value={addItemForm.purity}
-  //             onChange={(e) => handleAddItemFormChange('purity', e.target.value)}
-  //             className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-  //             required
-  //           >
-  //             <option value="">{t("Select Purity")}</option>
-  //             {purities.map((p) => (
-  //               <option key={p.purity} value={p.purity}>
-  //                 {p.purity}%
-  //               </option>
-  //             ))}
-  //           </select>
-  //         </div>
-
-  //         {/* Toggle Button for Bulk Entry */}
-  //         <div className="flex items-center justify-between">
-  //           <label className="text-sm font-medium">{t("Entry Type")}:</label>
-  //           <div className="flex items-center space-x-3">
-  //             <span className={`text-sm ${!addItemForm.isBulk ? 'font-medium text-gray-900' : 'text-gray-500'}`}>
-  //               {t("Single")}
-  //             </span>
-  //             <button
-  //               type="button"
-  //               onClick={() => handleAddItemFormChange('isBulk', !addItemForm.isBulk)}
-  //               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-  //                 addItemForm.isBulk ? 'bg-blue-600' : 'bg-gray-200'
-  //               }`}
-  //             >
-  //               <span
-  //                 className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-  //                   addItemForm.isBulk ? 'translate-x-6' : 'translate-x-1'
-  //                 }`}
-  //               />
-  //             </button>
-  //             <span className={`text-sm ${addItemForm.isBulk ? 'font-medium text-gray-900' : 'text-gray-500'}`}>
-  //               {t("Bulk")}
-  //             </span>
-  //           </div>
-  //         </div>
-
-  //         {/* Quantity Input (only for bulk) */}
-  //         {addItemForm.isBulk && (
-  //           <div>
-  //             <label className="block text-sm font-medium mb-1">
-  //               {t("Quantity")} <span className="text-red-500">*</span>
-  //             </label>
-  //             <Input
-  //               type="number"
-  //               placeholder={t("Enter number of items")}
-  //               value={addItemForm.quantity}
-  //               onChange={(e) => handleAddItemFormChange('quantity', e.target.value)}
-  //               min="1"
-  //               required
-  //             />
-  //           </div>
-  //         )}
-
-  //         {/* Notes Input - NEW FIELD */}
-  //         <div>
-  //           <label className="block text-sm font-medium mb-1">
-  //             {t("Notes")} <span className="text-gray-400 text-xs">({t("Optional")})</span>
-  //           </label>
-  //           <textarea
-  //             placeholder={t("Add any notes or description for this item...")}
-  //             value={addItemForm.notes}
-  //             onChange={(e) => handleAddItemFormChange('notes', e.target.value)}
-  //             className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
-  //             rows={3}
-  //             maxLength={500}
-  //           />
-  //           <div className="text-xs text-gray-500 mt-1">
-  //             {addItemForm.notes.length}/500 {t("characters")}
-  //           </div>
-  //         </div>
-
-  //         {/* Info Text */}
-  //         <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded">
-  //           {addItemForm.isBulk ? (
-  //             <div>
-  //               <p className="mb-1">
-  //                 <strong>{t("Bulk Entry")}:</strong> {t("If a bulk entry already exists for this purity, it will be updated with the new weight and quantity.")}
-  //               </p>
-  //               <p className="text-gray-600">
-  //                 {t("Notes will be appended to existing notes if any.")}
-  //               </p>
-  //             </div>
-  //           ) : (
-  //             <p>
-  //               <strong>{t("Single Entry")}:</strong> {t("This will add one individual item entry with the specified notes.")}
-  //             </p>
-  //           )}
-  //         </div>
-
-  //         {/* Action Buttons */}
-  //         <div className="flex gap-2 justify-end pt-4">
-  //           <Button
-  //             onClick={() => {
-  //               setIsAddItemOpen(false);
-  //               resetAddItemForm();
-  //             }}
-  //             variant="outline"
-  //             disabled={submitting}
-  //           >
-  //             {t("Cancel")}
-  //           </Button>
-  //           <Button
-  //             onClick={handleAddItem}
-  //             disabled={submitting || !addItemForm.weight || !addItemForm.purity}
-  //             className="bg-blue-600 hover:bg-blue-700 text-white"
-  //           >
-  //             {submitting ? t("Adding...") : t("Add Item")}
-  //           </Button>
-  //         </div>
-  //       </div>
-  //     </Modal>
-
-  //     {/* Purity Config Modal */}
-  //     <Modal
-  //       isOpen={isConfigOpen}
-  //       onClose={() => setIsConfigOpen(false)}
-  //       title={t("Manage Purities")}
-  //     >
-  //       <div className="space-y-4">
-  //         {/* Add New Purity */}
-  //         <div>
-  //           <h3 className="font-medium mb-2">{t("Add New Purity Level")}</h3>
-  //           <div className="flex gap-2">
-  //             <Input
-  //               type="number"
-  //               placeholder={t("Enter purity (0-100%)")}
-  //               value={newPurity}
-  //               onChange={(e) => setNewPurity(e.target.value)}
-  //               min="0"
-  //               max="100"
-  //               step="0.1"
-  //             />
-  //             <Button onClick={handleAddPurity} size="sm">
-  //               <Plus size={16} />
-  //             </Button>
-  //           </div>
-  //         </div>
-
-  //         {/* Existing Purities */}
-  //         <div>
-  //           <h3 className="font-medium mb-2">{t("Existing Purities")}</h3>
-  //           {purities.length === 0 ? (
-  //             <p className="text-sm text-gray-500">{t("No purities available")}</p>
-  //           ) : (
-  //             <div className="space-y-2 max-h-60 overflow-y-auto">
-  //               {purities.map((p) => (
-  //                 <div
-  //                   key={p.purity}
-  //                   className="flex items-center justify-between p-2 border rounded"
-  //                 >
-  //                   <div>
-  //                     <span className="font-medium">{p.purity}%</span>
-  //                     <span className="text-sm text-gray-500 ml-2">
-  //                       ({p.totalItems} {t("items")}, {p.grossWeight.toFixed(2)}g)
-  //                     </span>
-  //                   </div>
-  //                   <div className="flex gap-1">
-  //                     <Button
-  //                       onClick={() => startEdit(p.purity)}
-  //                       variant="outline"
-  //                       size="sm"
-  //                       className="text-blue-600 hover:text-blue-700"
-  //                     >
-  //                       <Edit2 size={14} />
-  //                     </Button>
-  //                     <Button
-  //                       onClick={() => setDeleteConfirm(p.purity)}
-  //                       variant="outline"
-  //                       size="sm"
-  //                       className="text-red-600 hover:text-red-700"
-  //                     >
-  //                       <Trash2 size={14} />
-  //                     </Button>
-  //                   </div>
-  //                 </div>
-  //               ))}
-  //             </div>
-  //           )}
-  //         </div>
-  //       </div>
-  //     </Modal>
-
-  //     {/* Edit Purity Modal */}
-  //     <Modal
-  //       isOpen={editPurity !== null}
-  //       onClose={() => {
-  //         setEditPurity(null);
-  //         setEditValue('');
-  //       }}
-  //       title={t("Edit Purity Level")}
-  //     >
-  //       <div className="space-y-4">
-  //         <p>
-  //           {t("Edit purity level from")} {editPurity}% {t("to")}:
-  //         </p>
-  //         <Input
-  //           type="number"
-  //           placeholder={t("Enter new purity (0-100%)")}
-  //           value={editValue}
-  //           onChange={(e) => setEditValue(e.target.value)}
-  //           min="0"
-  //           max="100"
-  //           step="0.1"
-  //         />
-  //         <div className="flex gap-2 justify-end">
-  //           <Button
-  //             onClick={() => {
-  //               setEditPurity(null);
-  //               setEditValue('');
-  //             }}
-  //             variant="outline"
-  //           >
-  //             {t("Cancel")}
-  //           </Button>
-  //           <Button onClick={handleEditPurity}>
-  //             {t("Update")}
-  //           </Button>
-  //         </div>
-  //       </div>
-  //     </Modal>
-
-  //     {/* Delete Confirmation Modal */}
-  //     <Modal
-  //       isOpen={deleteConfirm !== null}
-  //       onClose={() => setDeleteConfirm(null)}
-  //       title={t("Confirm Delete")}
-  //     >
-  //       <div className="space-y-4">
-  //         <p>
-  //           {t("Are you sure you want to delete the")} {deleteConfirm}% {t("purity level")}?
-  //         </p>
-  //         <p className="text-sm text-red-600">
-  //           {t("This will also delete all entries under this purity level!")}
-  //         </p>
-  //         <div className="flex gap-2 justify-end">
-  //           <Button
-  //             onClick={() => setDeleteConfirm(null)}
-  //             variant="outline"
-  //           >
-  //             {t("Cancel")}
-  //           </Button>
-  //           <Button
-  //             onClick={() => handleDeletePurity(deleteConfirm)}
-  //             className="bg-red-600 hover:bg-red-700 text-white"
-  //           >
-  //             {t("Delete")}
-  //           </Button>
-  //         </div>
-  //       </div>
-  //     </Modal>
-  //   </div>
-  // );
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800">

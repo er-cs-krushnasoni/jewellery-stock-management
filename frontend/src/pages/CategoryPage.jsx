@@ -10,6 +10,7 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { Settings, Plus, Edit2, Trash2, Save, X } from "lucide-react";
 import BackButton from "@/components/ui/BackButton";
+import { api } from "../config/api";
 
 export default function CategoryPage() {
   const { metal } = useParams();
@@ -32,14 +33,17 @@ export default function CategoryPage() {
   const fetchMetadata = async () => {
     try {
       const token = localStorage.getItem("token");
-      const res = await axios.get(`${import.meta.env.VITE_API_BASE_URL}/api/metadata`, {
+      
+      // Updated: Use centralized api instance
+      const res = await api.get('/api/metadata', {
         headers: { Authorization: `Bearer ${token}` },
       });
+      
       const data = res.data.categoryTotals || {};
       
       console.log("🔍 CategoryPage - Raw metadata:", data);
       console.log("🔍 CategoryPage - URL metal param:", metal);
-  
+    
       // Filter categories for the specified metal
       const filtered = Object.entries(data)
         .filter(([key, val]) => {
@@ -60,7 +64,7 @@ export default function CategoryPage() {
           totalItems: val.totalItems || 0,
           metal: val.metal || metal.toLowerCase()
         }));
-  
+    
       console.log("🔍 CategoryPage - Filtered categories:", filtered);
       setCategories(filtered);
     } catch (err) {
@@ -84,8 +88,8 @@ export default function CategoryPage() {
 
     try {
       const token = localStorage.getItem("token");
-      const response = await axios.post(
-        `${import.meta.env.VITE_API_BASE_URL}/api/config/categories/rename`,
+      const response = await api.post(
+        '/api/config/categories/rename',
         {
           metalType: metal,
           oldName: oldName,
@@ -121,8 +125,8 @@ export default function CategoryPage() {
 
     try {
       const token = localStorage.getItem("token");
-      const response = await axios.delete(
-        `${import.meta.env.VITE_API_BASE_URL}/api/config/categories`,
+      const response = await api.delete(
+        `$/api/config/categories`,
         {
           headers: { Authorization: `Bearer ${token}` },
           data: {
@@ -165,8 +169,8 @@ export default function CategoryPage() {
       const token = localStorage.getItem("token");
       console.log("🔑 Token exists:", !!token);
       
-      const response = await axios.post(
-        `${import.meta.env.VITE_API_BASE_URL}/api/config/categories`,
+      const response = await api.post(
+        `/api/config/categories`,
         requestData,
         {
           headers: { Authorization: `Bearer ${token}` }
@@ -196,209 +200,6 @@ export default function CategoryPage() {
 
   if (loading) return <p className="p-4">{t("Loading...")}</p>;
 
-  // return (
-  //   <div className="p-4 space-y-4">
-  //     <BackButton to="/" label={t("Back to Home")} />
-  //     <div className="flex justify-between items-center">
-  //       <h1 className="text-2xl font-bold capitalize">{t(metal)} Categories</h1>
-  //       <Button
-  //         variant="outline"
-  //         size="sm"
-  //         onClick={() => setConfigOpen(true)}
-  //         className="flex items-center gap-2"
-  //       >
-  //         <Settings size={16} />
-  //         Config
-  //       </Button>
-  //     </div>
-      
-  //     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-  //       {categories.map((cat) => (
-  //         <button
-  //           key={cat.name}
-  //           onClick={() => {
-  //             console.log(`Clicking on ${cat.name}`);
-  //             handleCardClick(metal, cat.name);
-  //           }}
-  //           className="cursor-pointer text-left w-full focus:outline-none focus:ring-2 focus:ring-blue-500 rounded-lg"
-  //         >
-  //           <Card
-  //             className={cn(
-  //               "transition hover:shadow-xl border-2 h-full",
-  //               metal === "gold" ? "border-yellow-400" : "border-gray-400"
-  //             )}
-  //           >
-  //             <CardContent className="p-4">
-  //               <h2 className="text-xl font-semibold">{cat.name}</h2>
-  //               <p>
-  //                 {t("Gross Weight")}: {cat.grossWeight.toFixed(2)}g
-  //               </p>
-  //               <p>
-  //                 {t("Pure Weight")}: {cat.pureWeight.toFixed(2)}g
-  //               </p>
-  //               <p>
-  //                 {t("Total Items")}: {cat.totalItems}
-  //               </p>
-  //               <p className="text-xs text-gray-500 mt-2">
-  //                 Metal: {cat.metal}
-  //               </p>
-  //             </CardContent>
-  //           </Card>
-  //         </button>
-  //       ))}
-  //     </div>
-      
-  //     {/* <div className="pt-6">
-  //       <Button variant="outline" onClick={() => navigate("/")}>{t("Back")}</Button>
-  //     </div> */}
-
-  //     {/* Configuration Modal */}
-  //     <Modal
-  //       isOpen={configOpen}
-  //       onClose={() => {
-  //         setConfigOpen(false);
-  //         setEditingCategory(null);
-  //         setNewCategoryName("");
-  //         setIsCreating(false);
-  //       }}
-  //       title={`Manage ${metal.charAt(0).toUpperCase() + metal.slice(1)} Categories`}
-  //     >
-  //       <div className="space-y-4">
-  //         {/* Add New Category Section */}
-  //         <div className="border-b pb-4">
-            
-  //           {!isCreating ? (
-  //             <Button
-  //               variant="outline"
-  //               size="sm"
-  //               onClick={() => setIsCreating(true)}
-  //               className="w-full"
-  //             >
-  //               <Plus size={16} className="mr-2" />
-  //               Create New Category
-  //             </Button>
-  //           ) : (
-  //             <div className="flex gap-2">
-  //               <Input
-  //                 value={newCategoryName}
-  //                 onChange={(e) => setNewCategoryName(e.target.value)}
-  //                 placeholder="Enter category name"
-  //                 className="flex-1"
-  //                 onKeyPress={(e) => {
-  //                   if (e.key === 'Enter') {
-  //                     handleCreateCategory();
-  //                   }
-  //                   if (e.key === 'Escape') {
-  //                     setIsCreating(false);
-  //                     setNewCategoryName("");
-  //                   }
-  //                 }}
-  //               />
-  //               <Button
-  //                 size="sm"
-  //                 onClick={handleCreateCategory}
-  //                 disabled={!newCategoryName.trim()}
-  //               >
-  //                 <Save size={16} />
-  //               </Button>
-  //               <Button
-  //                 variant="outline"
-  //                 size="sm"
-  //                 onClick={() => {
-  //                   setIsCreating(false);
-  //                   setNewCategoryName("");
-  //                 }}
-  //               >
-  //                 <X size={16} />
-  //               </Button>
-  //             </div>
-  //           )}
-  //         </div>
-
-  //         {/* Existing Categories */}
-  //         <div>
-  //           <h3 className="font-medium mb-3">Existing Categories</h3>
-  //           <div className="space-y-2">
-  //             {categories.length === 0 ? (
-  //               <p className="text-gray-500 text-sm">No categories found</p>
-  //             ) : (
-  //               categories.map((cat) => (
-  //                 <div
-  //                   key={cat.name}
-  //                   className="flex items-center justify-between p-3 border rounded-lg"
-  //                 >
-  //                   <div className="flex-1">
-  //                     {editingCategory === cat.name ? (
-  //                       <div className="flex gap-2">
-  //                         <Input
-  //                           defaultValue={cat.name}
-  //                           className="flex-1"
-  //                           onKeyPress={(e) => {
-  //                             if (e.key === 'Enter') {
-  //                               handleRenameCategory(cat.name, e.target.value);
-  //                             }
-  //                             if (e.key === 'Escape') {
-  //                               setEditingCategory(null);
-  //                             }
-  //                           }}
-  //                           onBlur={(e) => {
-  //                             if (e.target.value.trim() !== cat.name) {
-  //                               handleRenameCategory(cat.name, e.target.value);
-  //                             } else {
-  //                               setEditingCategory(null);
-  //                             }
-  //                           }}
-  //                           autoFocus
-  //                         />
-  //                       </div>
-  //                     ) : (
-  //                       <div>
-  //                         <p className="font-medium">{cat.name}</p>
-  //                         <p className="text-sm text-gray-500">
-  //                           {cat.totalItems} items, {cat.grossWeight.toFixed(2)}g gross
-  //                         </p>
-  //                       </div>
-  //                     )}
-  //                   </div>
-                    
-  //                   <div className="flex gap-1">
-  //                     <Button
-  //                       variant="ghost"
-  //                       size="sm"
-  //                       onClick={() => {
-  //                         if (editingCategory === cat.name) {
-  //                           setEditingCategory(null);
-  //                         } else {
-  //                           setEditingCategory(cat.name);
-  //                         }
-  //                       }}
-  //                     >
-  //                       <Edit2 size={14} />
-  //                     </Button>
-  //                     <Button
-  //                       variant="ghost"
-  //                       size="sm"
-  //                       onClick={() => handleDeleteCategory(cat.name)}
-  //                       className="text-red-600 hover:text-red-700"
-  //                     >
-  //                       <Trash2 size={14} />
-  //                     </Button>
-  //                   </div>
-  //                 </div>
-  //               ))
-  //             )}
-  //           </div>
-  //         </div>
-
-  //         <div className="pt-4 border-t">
-  //           <p className="text-xs text-gray-500">
-  //             Note: Creating a new category will add a placeholder entry. Deleting a category will remove all associated entries permanently.
-  //           </p>
-  //         </div>
-  //       </div>
-  //     </Modal>
-  //   </div>
-  // );
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-4 lg:p-6">

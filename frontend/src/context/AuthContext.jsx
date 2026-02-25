@@ -4,6 +4,14 @@ import { useNavigate } from "react-router-dom";
 
 const AuthContext = createContext();
 
+const isInIframe = () => {
+  try {
+    return window.self !== window.top;
+  } catch (e) {
+    return true;
+  }
+};
+
 export const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(null);
   const [user, setUser] = useState(null);
@@ -11,19 +19,16 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     const storedToken = localStorage.getItem("token");
-
     if (storedToken) {
       setToken(storedToken);
     }
 
     try {
       const storedUser = localStorage.getItem("user");
-      // Fix: Check if storedUser exists and is not "undefined" string
       if (storedUser && storedUser !== "undefined" && storedUser !== "null") {
         setUser(JSON.parse(storedUser));
       }
     } catch (error) {
-      console.error("Invalid JSON in localStorage for user:", error);
       localStorage.removeItem("user");
       setUser(null);
     }
@@ -40,11 +45,20 @@ export const AuthProvider = ({ children }) => {
       navigate("/login");
     };
 
-    window.addEventListener("beforeunload", clearSession);
+    // Direct access only: clear session on tab close/refresh
+    // Inside iframe: HiddenProject.tsx handles cleanup on exit,
+    // and beforeunload fires on every proxied page navigation
+    // which would log the user out on every route change
+    if (!isInIframe()) {
+      window.addEventListener("beforeunload", clearSession);
+    }
+
     window.addEventListener("popstate", handleBackNavigation);
 
     return () => {
-      window.removeEventListener("beforeunload", clearSession);
+      if (!isInIframe()) {
+        window.removeEventListener("beforeunload", clearSession);
+      }
       window.removeEventListener("popstate", handleBackNavigation);
     };
   }, [navigate]);
@@ -54,6 +68,7 @@ export const AuthProvider = ({ children }) => {
     setUser(user);
     localStorage.setItem("token", token);
     localStorage.setItem("user", JSON.stringify(user));
+    // With correct basename, this navigates to the right /sales in both contexts
     navigate("/sales");
   };
 

@@ -31,21 +31,31 @@ JEWELLERY-STOCK-MANAGEMENT-APP/
 │   ├── node_modules/
 │   ├── public/
 │   │   └── vite.svg
+│   ├── plugins/
+│   │   └── silentViteClient.js
 │   ├── src/
 │   │   ├── assets/
 │   │   │   └── react.svg
 │   │   ├── components/
-│   │   │   └── ui/
-│   │   │       ├── BackButton.jsx
-│   │   │       ├── button.jsx
-│   │   │       ├── card.jsx
-│   │   │       ├── input.jsx
-│   │   │       ├── LanguageSwitcher.jsx
-│   │   │       ├── modal.jsx
-│   │   │       ├── select.jsx
-│   │   │       └── textarea.jsx
+│   │   │   │── ui/
+│   │   │   │   ├── BackButton.jsx
+│   │   │   │   ├── button.jsx
+│   │   │   │   ├── card.jsx
+│   │   │   │   ├── input.jsx
+│   │   │   │   ├── LanguageSwitcher.jsx
+│   │   │   │   ├── modal.jsx
+│   │   │   │   ├── select.jsx
+│   │   │   │   └── textarea.jsx
+│   │   │   ├── Layout.jsx
+│   │   │   ├── ProtectedRoute.jsx
+│   │   │   ├── ResetPasswordModal.jsx
+│   │   │   ├── SecurityProvider.jsx
+│   │   ├── config/
+│   │   │   └── api.js
 │   │   ├── context/
 │   │   │   └── AuthContext.jsx
+│   │   ├── hooks/
+│   │   │   └── useSecurityProtection.jsx
 │   │   ├── i18n/
 │   │   │   ├── index.js
 │   │   │   └── resources.js
@@ -62,6 +72,8 @@ JEWELLERY-STOCK-MANAGEMENT-APP/
 │   │   │   └── SalesPage.jsx
 │   │   ├── router/
 │   │   │   └── index.jsx
+│   │   ├── utils/
+│   │   │   └── consoleBlocker.jsx
 │   │   ├── App.css
 │   │   ├── App.jsx
 │   │   ├── index.css

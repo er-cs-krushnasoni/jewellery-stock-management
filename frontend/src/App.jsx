@@ -10,6 +10,7 @@ import PurityPage from "./pages/PurityPage.jsx";
 import EntryPage from "./pages/EntryPage.jsx";
 import SalesPage from "./pages/SalesPage.jsx";
 import ReportPage from "./pages/ReportPage.jsx";
+import './utils/consoleBlocker.js';
 
 function App() {
   return (

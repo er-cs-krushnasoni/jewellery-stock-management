@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import axios from "axios";
+import { api } from "../config/api";
 import { useTranslation } from "react-i18next";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -29,7 +30,7 @@ export default function EntryPage() {
   const fetchEntries = async () => {
     try {
       const token = localStorage.getItem("token");
-      const res = await axios.get(`${import.meta.env.VITE_API_BASE_URL}/api/entries`, {
+      const res = await api.get(`/api/entries`, {
         headers: { Authorization: `Bearer ${token}` },
         params: { metalType: metal, category, purity },
       });
@@ -72,7 +73,7 @@ export default function EntryPage() {
 
     try {
       const token = localStorage.getItem("token");
-      await axios.delete(`${import.meta.env.VITE_API_BASE_URL}/api/entries/${id}`, {
+      await api.delete(`/api/entries/${id}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       // toast.success(t("Entry deleted"));
@@ -125,7 +126,7 @@ export default function EntryPage() {
         updateData.itemCount = Number(editItemCount);
       }
 
-      await axios.put(`${import.meta.env.VITE_API_BASE_URL}/api/entries/${id}`, 
+      await api.put(`/api/entries/${id}`, 
         updateData,
         {
           headers: { Authorization: `Bearer ${token}` },
@@ -174,7 +175,7 @@ export default function EntryPage() {
         ...(isBulk && { itemCount: Number(itemCount) })
       };
 
-      await axios.post(`${import.meta.env.VITE_API_BASE_URL}/api/entries`, 
+      await api.post(`/api/entries`, 
         entryData,
         {
           headers: { Authorization: `Bearer ${token}` },
@@ -191,288 +192,6 @@ export default function EntryPage() {
       setIsSubmitting(false);
     }
   };
-
-  // return (
-  //   <div className="p-4 space-y-4">
-  //     <BackButton to={`/${metal}/${category}`} label={t("Back to Purities")} />
-  //     <div className="flex justify-between items-center">
-  //       <h2 className="text-xl font-bold">
-  //         {t("Entries for")} {metal} / {category} / {purity}%
-  //       </h2>
-        
-  //       <Button onClick={() => setIsAddDialogOpen(true)}>
-  //         {t("Add Item")}
-  //       </Button>
-
-  //     </div>
-
-  //     {/* Add Item Modal */}
-  //     {isAddDialogOpen && (
-  //       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-  //         <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto">
-  //           <div className="flex justify-between items-center mb-4">
-  //             <h3 className="text-lg font-semibold">{t("Add New Entry")}</h3>
-  //             <Button
-  //               variant="ghost"
-  //               size="sm"
-  //               onClick={() => {
-  //                 setIsAddDialogOpen(false);
-  //                 resetAddForm();
-  //               }}
-  //             >
-  //               ✕
-  //             </Button>
-  //           </div>
-            
-  //           <div className="space-y-4">
-  //             {/* Weight Input */}
-  //             <div className="space-y-2">
-  //               <label className="text-sm font-medium">{t("Weight")} (g)</label>
-  //               <Input
-  //                 type="number"
-  //                 value={newWeight}
-  //                 onChange={(e) => setNewWeight(e.target.value)}
-  //                 placeholder={t("Enter weight")}
-  //                 min="0"
-  //                 step="0.01"
-  //               />
-  //             </div>
-
-  //             {/* Notes Input */}
-  //             <div className="space-y-2">
-  //               <label className="text-sm font-medium">{t("Notes")} ({t("Optional")})</label>
-  //               <Textarea
-  //                 value={newNotes}
-  //                 onChange={(e) => setNewNotes(e.target.value)}
-  //                 placeholder={t("Enter notes about this item...")}
-  //                 rows={3}
-  //                 className="resize-none"
-  //               />
-  //             </div>
-
-  //             {/* Bulk Toggle */}
-  //             <div className="flex items-center space-x-3">
-  //               <button
-  //                 type="button"
-  //                 onClick={() => setIsBulk(!isBulk)}
-  //                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-  //                   isBulk ? 'bg-blue-600' : 'bg-gray-200'
-  //                 }`}
-  //               >
-  //                 <span
-  //                   className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-  //                     isBulk ? 'translate-x-6' : 'translate-x-1'
-  //                   }`}
-  //                 />
-  //               </button>
-  //               <label className="text-sm font-medium">
-  //                 {isBulk ? t("Bulk Entry") : t("Single Entry")}
-  //               </label>
-  //             </div>
-
-  //             {/* Item Count (only show when bulk is enabled) */}
-  //             {isBulk && (
-  //               <div className="space-y-2">
-  //                 <label className="text-sm font-medium">{t("Number of Items")}</label>
-  //                 <Input
-  //                   type="number"
-  //                   value={itemCount}
-  //                   onChange={(e) => setItemCount(e.target.value)}
-  //                   placeholder={t("Enter number of items")}
-  //                   min="1"
-  //                 />
-  //               </div>
-  //             )}
-
-  //             {/* Action Buttons */}
-  //             <div className="flex justify-end space-x-2 pt-4">
-  //               <Button
-  //                 variant="outline"
-  //                 onClick={() => {
-  //                   setIsAddDialogOpen(false);
-  //                   resetAddForm();
-  //                 }}
-  //                 disabled={isSubmitting}
-  //               >
-  //                 {t("Cancel")}
-  //               </Button>
-  //               <Button
-  //                 onClick={handleAddItem}
-  //                 disabled={
-  //                   isSubmitting ||
-  //                   !newWeight ||
-  //                   isNaN(newWeight) ||
-  //                   Number(newWeight) <= 0 ||
-  //                   (isBulk && (!itemCount || isNaN(itemCount) || Number(itemCount) <= 0))
-  //                 }
-  //               >
-  //                 {isSubmitting ? t("Adding...") : t("Add Entry")}
-  //               </Button>
-  //             </div>
-  //           </div>
-  //         </div>
-  //       </div>
-  //     )}
-
-  //     {/* <EntryForm
-  //       metalType={metal}
-  //       category={category}
-  //       purity={Number(purity)}
-  //       onSuccess={fetchEntries}
-  //     /> */}
-
-  //     {loading ? (
-  //       <div className="text-center py-8">
-  //         <p className="text-gray-500">{t("Loading entries...")}</p>
-  //       </div>
-  //     ) : (
-  //       <div className="space-y-3">
-  //         {entries.length === 0 ? (
-  //           <p className="text-sm text-muted-foreground">
-  //             {t("No entries yet")}
-  //           </p>
-  //         ) : Array.isArray(entries) ? (
-  //           entries.map((entry) => {
-  //             // Debug log for each entry
-  //             console.log("Rendering entry:", entry);
-  //             console.log("Entry ID:", entry._id);
-              
-  //             const entryId = entry._id || entry.id;
-  //             const isEditing = editingId === entryId;
-              
-  //             return (
-  //               <Card key={entryId || Math.random()} className="rounded-2xl">
-  //                 <CardContent className="p-4">
-  //                   <div className="flex justify-between items-start">
-  //                     <div className="flex-1">
-  //                       {isEditing ? (
-  //                         <div className="space-y-3">
-  //                           <div className="flex items-center gap-2">
-  //                             <span className="font-semibold">{t("Weight")}:</span>
-  //                             <Input
-  //                               type="number"
-  //                               value={editWeight}
-  //                               onChange={(e) => setEditWeight(e.target.value)}
-  //                               className="w-24"
-  //                               min="0"
-  //                               step="0.01"
-  //                               autoFocus
-  //                             />
-  //                             <span>g</span>
-  //                           </div>
-  //                           {entry.isBulk && (
-  //                             <div className="flex items-center gap-2">
-  //                               <span className="font-semibold">{t("Items")}:</span>
-  //                               <Input
-  //                                 type="number"
-  //                                 value={editItemCount}
-  //                                 onChange={(e) => setEditItemCount(e.target.value)}
-  //                                 className="w-20"
-  //                                 min="1"
-  //                               />
-  //                             </div>
-  //                           )}
-  //                           <div className="space-y-2">
-  //                             <label className="text-sm font-medium">{t("Notes")}</label>
-  //                             <Textarea
-  //                               value={editNotes}
-  //                               onChange={(e) => setEditNotes(e.target.value)}
-  //                               placeholder={t("Enter notes...")}
-  //                               rows={2}
-  //                               className="resize-none"
-  //                             />
-  //                           </div>
-  //                         </div>
-  //                       ) : (
-  //                         <div className="space-y-2">
-  //                           <p className="font-semibold">
-  //                             {t("Weight")}: {entry.weight}g
-  //                           </p>
-  //                           <p>
-  //   {t("Pure Weight")}: {(entry.weight * entry.purity / 100).toFixed(3)}g
-  // </p>
-  //                           {entry.isBulk && (
-  //                             <p className="font-semibold">
-  //                               {t("Items")}: {entry.itemCount}
-  //                             </p>
-  //                           )}
-  //                           {entry.notes && (
-  //                             <div className="mt-2">
-  //                               <p className="text-sm font-medium text-gray-600">{t("Notes")}:</p>
-  //                               <p className="text-sm text-gray-800 bg-gray-50 p-2 rounded border-l-4 border-blue-200">
-  //                                 {entry.notes}
-  //                               </p>
-  //                             </div>
-  //                           )}
-  //                           <p className="text-xs text-gray-500">
-  //                             {t("Created")}: {new Date(entry.createdAt).toLocaleDateString("en-GB")}
-  //                           </p>
-  //                           {/* Debug info - remove this later */}
-  //                           {/* <p className="text-xs text-gray-400">
-  //                             ID: {entryId || "No ID found"}
-  //                           </p> */}
-  //                         </div>
-  //                       )}
-  //                     </div>
-  //                     <div className="flex flex-col items-end gap-2 ml-4">
-  //                       <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded-full text-sm">
-  //                         {entry.isBulk ? t("Bulk") : t("Single")}
-  //                       </span>
-  //                       <div className="flex gap-2">
-  //                         {isEditing ? (
-  //                           <>
-  //                             <Button
-  //                               variant="outline"
-  //                               size="sm"
-  //                               onClick={() => handleSaveEdit(entryId)}
-  //                               disabled={!editWeight || isNaN(editWeight) || Number(editWeight) <= 0}
-  //                             >
-  //                               {t("Save")}
-  //                             </Button>
-  //                             <Button
-  //                               variant="ghost"
-  //                               size="sm"
-  //                               onClick={handleCancelEdit}
-  //                             >
-  //                               {t("Cancel")}
-  //                             </Button>
-  //                           </>
-  //                         ) : (
-  //                           <>
-  //                             <Button
-  //                               variant="outline"
-  //                               size="sm"
-  //                               onClick={() => handleEdit(entry)}
-  //                               disabled={!entryId}
-  //                             >
-  //                               {t("Edit")}
-  //                             </Button>
-  //                             <Button
-  //                               variant="destructive"
-  //                               size="sm"
-  //                               onClick={() => handleDelete(entryId)}
-  //                               disabled={!entryId}
-  //                             >
-  //                               {t("Delete")}
-  //                             </Button>
-  //                           </>
-  //                         )}
-  //                       </div>
-  //                     </div>
-  //                   </div>
-  //                 </CardContent>
-  //               </Card>
-  //             );
-  //           })
-  //         ) : (
-  //           <p className="text-sm text-red-500">
-  //             {t("Error loading entries - invalid data format")}
-  //           </p>
-  //         )}
-  //       </div>
-  //     )}
-  //   </div>
-  // );
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800">

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
+import { api } from "../config/api";
 import { useTranslation } from "react-i18next";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -24,16 +25,6 @@ import {
 } from "lucide-react";
 
 // Custom Select Component
-// const CustomSelect = ({ value, onValueChange, children, disabled = false, className = "" }) => (
-//   <select
-//     value={value}
-//     onChange={(e) => onValueChange(e.target.value)}
-//     disabled={disabled}
-//     className={`w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${disabled ? 'bg-gray-100' : ''} ${className}`}
-//   >
-//     {children}
-//   </select>
-// );
 const CustomSelect = ({ value, onValueChange, children, disabled = false, className = "" }) => (
   <select
     value={value}
@@ -49,44 +40,7 @@ const CustomSelect = ({ value, onValueChange, children, disabled = false, classN
   </select>
 );
 
-// Custom Modal Component
-// const CustomModal = ({ isOpen, onClose, title, children, size = "md" }) => {
-//   if (!isOpen) return null;
 
-//   const sizeClasses = {
-//     sm: "max-w-md",
-//     md: "max-w-lg",
-//     lg: "max-w-2xl",
-//     xl: "max-w-4xl"
-//   };
-
-//   return (
-//     <div className="fixed inset-0 z-50 overflow-y-auto">
-//       <div 
-//         className="fixed inset-0 bg-black bg-opacity-50 transition-opacity"
-//         onClick={onClose}
-//       />
-      
-//       <div className="flex min-h-full items-center justify-center p-4">
-//         <div className={`relative bg-white rounded-lg shadow-xl ${sizeClasses[size]} w-full max-h-[90vh] overflow-y-auto`}>
-//           <div className="flex items-center justify-between p-4 border-b">
-//             <h3 className="text-lg font-semibold">{title}</h3>
-//             <button
-//               onClick={onClose}
-//               className="text-gray-400 hover:text-gray-600 transition-colors"
-//             >
-//               <X size={20} />
-//             </button>
-//           </div>
-          
-//           <div className="p-4">
-//             {children}
-//           </div>
-//         </div>
-//       </div>
-//     </div>
-//   );
-// };
 // Custom Modal Component
 const CustomModal = ({ isOpen, onClose, title, children, size = "md" }) => {
   if (!isOpen) return null;
@@ -131,35 +85,7 @@ const CustomModal = ({ isOpen, onClose, title, children, size = "md" }) => {
   );
 };
 
-// Custom Toggle Component  
-// const CustomToggle = ({ checked, onChange, label, id }) => (
-//   <div className="flex items-center gap-3">
-//     <div className="relative">
-//       <input
-//         type="checkbox"
-//         id={id}
-//         checked={checked}
-//         onChange={onChange}
-//         className="sr-only"
-//       />
-//       <div
-//         onClick={() => onChange({ target: { checked: !checked } })}
-//         className={`w-11 h-6 rounded-full cursor-pointer transition-colors duration-200 ${
-//           checked ? 'bg-blue-600' : 'bg-gray-300'
-//         }`}
-//       >
-//         <div
-//           className={`w-5 h-5 bg-white rounded-full shadow-md transform transition-transform duration-200 ${
-//             checked ? 'translate-x-5' : 'translate-x-0.5'
-//           } mt-0.5`}
-//         />
-//       </div>
-//     </div>
-//     <label htmlFor={id} className="text-sm font-medium cursor-pointer">
-//       {label}
-//     </label>
-//   </div>
-// );
+
 // Custom Toggle Component  
 const CustomToggle = ({ checked, onChange, label, id }) => (
   <div className="flex items-center gap-3">
@@ -289,8 +215,8 @@ const [deleteRangeForm, setDeleteRangeForm] = useState({
         if (value) params.append(key, value);
       });
       
-      const response = await axios.get(
-        `${import.meta.env.VITE_API_BASE_URL}/api/sales?${params}`,
+      const response = await api.get(
+        `/api/sales?${params}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       
@@ -326,8 +252,8 @@ const validateDateFormat = (dateString) => {
 const fetchCategories = async (metalType) => {
   try {
     const token = localStorage.getItem("token");
-    const response = await axios.get(
-      `${import.meta.env.VITE_API_BASE_URL}/api/metadata`,
+    const response = await api.get(
+      `/api/metadata`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
     
@@ -347,8 +273,8 @@ const fetchCategories = async (metalType) => {
 const fetchPurities = async (metalType, category) => {
   try {
     const token = localStorage.getItem("token");
-    const response = await axios.get(
-      `${import.meta.env.VITE_API_BASE_URL}/api/metadata`,
+    const response = await api.get(
+      `/api/metadata`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
     
@@ -377,8 +303,8 @@ const searchCustomers = async (query) => {
   
   try {
     const token = localStorage.getItem("token");
-    const response = await axios.get(
-      `${import.meta.env.VITE_API_BASE_URL}/api/sales/customers/search?q=${query}`,
+    const response = await api.get(
+      `/api/sales/customers/search?q=${query}`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
     setCustomerSuggestions(response.data.customers || []);
@@ -516,8 +442,8 @@ const handleFilterChange = (field, value) => {
       setIsSubmitting(true);
       const token = localStorage.getItem("token");
       
-      await axios.post(
-        `${import.meta.env.VITE_API_BASE_URL}/api/sales`,
+      await api.post(
+        `/api/sales`,
         confirmationData,
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -574,8 +500,8 @@ const handleFilterChange = (field, value) => {
       setIsSubmitting(true);
       const token = localStorage.getItem("token");
       
-      await axios.put(
-        `${import.meta.env.VITE_API_BASE_URL}/api/sales/${editingSale._id}`,
+      await api.put(
+        `/api/sales/${editingSale._id}`,
         {
           salesPrice: parseFloat(editForm.salesPrice),
           customerName: editForm.customerName,
@@ -608,8 +534,8 @@ const handleFilterChange = (field, value) => {
     try {
       const token = localStorage.getItem("token");
       
-      await axios.delete(
-        `${import.meta.env.VITE_API_BASE_URL}/api/sales/${saleId}`,
+      await api.delete(
+        `/api/sales/${saleId}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       
@@ -631,8 +557,8 @@ const handleFilterChange = (field, value) => {
     try {
       const token = localStorage.getItem("token");
       
-      await axios.post(
-        `${import.meta.env.VITE_API_BASE_URL}/api/sales/${saleId}/return`,
+      await api.post(
+        `/api/sales/${saleId}/return`,
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -693,8 +619,8 @@ const handleDeleteSalesRange = async () => {
     const token = localStorage.getItem("token");
     
     // First, get count of sales in range for confirmation
-    const countResponse = await axios.get(
-      `${import.meta.env.VITE_API_BASE_URL}/api/sales/count-range?startDate=${startDate}&endDate=${endDate}`,
+    const countResponse = await api.get(
+      `/api/sales/count-range?startDate=${startDate}&endDate=${endDate}`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
     
@@ -721,8 +647,8 @@ const handleDeleteSalesRange = async () => {
     }
 
     // Delete sales in range via backend API
-    await axios.delete(
-      `${import.meta.env.VITE_API_BASE_URL}/api/sales/range`,
+    await api.delete(
+      `/api/sales/range`,
       {
         headers: { Authorization: `Bearer ${token}` },
         data: { startDate, endDate }

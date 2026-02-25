@@ -1,6 +1,7 @@
 // src/pages/Home.jsx
 import React, { useEffect, useState } from "react";
 import axios from "axios";
+import { api } from "../config/api";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -22,7 +23,7 @@ export default function Home() {
     const fetchData = async () => {
       const token = localStorage.getItem("token");
       try {
-        const res = await axios.get(`${import.meta.env.VITE_API_BASE_URL}/api/metadata`, {
+        const res = await api.get(`/api/metadata`, {
           headers: { Authorization: `Bearer ${token}` },
         });
 
@@ -278,11 +279,6 @@ return (
       
       {/* Modern Header with Gradient */}
       <div className="text-center space-y-3 sm:space-y-4">
-        {/* <div className="inline-flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl shadow-lg mb-2 sm:mb-4">
-          <svg className="w-6 h-6 sm:w-8 sm:h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-          </svg>
-        </div> */}
         <h2 className="text-2xl sm:text-4xl lg:text-5xl font-bold bg-gradient-to-r from-gray-900 via-blue-800 to-indigo-800 bg-clip-text text-transparent dark:from-gray-100 dark:via-blue-300 dark:to-indigo-300">
           Stock Overview
         </h2>
