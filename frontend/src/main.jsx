@@ -8,35 +8,20 @@ import "./index.css";
 import "./i18n";
 
 const isInIframe = () => {
-  try {
-    return window.self !== window.top;
-  } catch (e) {
-    return true;
-  }
+  try { return window.self !== window.top; } catch (e) { return true; }
 };
 
-// Suppress console inside iframe — but only display methods, never error
-// so React errors still surface during debugging
 if (isInIframe()) {
   const noop = function() {};
-  const suppress = ['log', 'info', 'warn', 'debug', 'trace', 'table', 'dir'];
-  suppress.forEach(method => {
-    try { console[method] = noop; } catch (e) {}
+  ['log', 'info', 'warn', 'debug', 'trace', 'table', 'dir'].forEach(m => {
+    try { console[m] = noop; } catch (e) {}
   });
 }
 
-// CRITICAL: Detect the basename dynamically.
-// When served directly:     window.location.pathname = "/login" → basename = "/"
-// When served via proxy:    window.location.pathname = "/hidden-app/login" → basename = "/hidden-app"
-// BrowserRouter needs the correct basename so React Router strips it before
-// matching routes. Without this, Router sees "/hidden-app/login" and finds
-// no matching route → blank white screen.
+// When served through /hidden-app proxy → basename = '/hidden-app'
+// When served directly → basename = '/'
 const getBasename = () => {
-  if (isInIframe()) {
-    // Inside iframe we are always accessed via the /hidden-app proxy
-    return '/hidden-app';
-  }
-  // Direct access — no basename needed
+  if (window.location.pathname.startsWith('/hidden-app')) return '/hidden-app';
   return '/';
 };
 

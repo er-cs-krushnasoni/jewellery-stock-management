@@ -11,15 +11,13 @@ export function Modal({ isOpen, onClose, title, children }) {
 
     const handleClickOutside = (e) => {
       if (modalRef.current && !modalRef.current.contains(e.target)) {
-        // Check if the clicked element is part of a select dropdown
-        // Select dropdowns are often rendered in portals outside the modal
-        const isSelectDropdown = e.target.closest('[data-radix-popper-content-wrapper]') ||
-                                 e.target.closest('[role="listbox"]') ||
-                                 e.target.closest('[data-state="open"]') ||
-                                 e.target.closest('.select-content') ||
-                                 e.target.closest('[data-radix-select-content]');
-        
-        // Don't close modal if clicking on select dropdown
+        const isSelectDropdown =
+          e.target.closest('[data-radix-popper-content-wrapper]') ||
+          e.target.closest('[role="listbox"]') ||
+          e.target.closest('[data-state="open"]') ||
+          e.target.closest('.select-content') ||
+          e.target.closest('[data-radix-select-content]');
+
         if (!isSelectDropdown) {
           onClose();
         }
@@ -28,7 +26,6 @@ export function Modal({ isOpen, onClose, title, children }) {
 
     if (isOpen) {
       document.addEventListener('keydown', handleEscape);
-      // Use 'mousedown' instead of 'click' for better dropdown support
       document.addEventListener('mousedown', handleClickOutside);
       document.body.style.overflow = 'hidden';
     }
@@ -44,29 +41,33 @@ export function Modal({ isOpen, onClose, title, children }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* Backdrop */}
-      <div className="absolute inset-0 bg-black bg-opacity-50" />
       
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/60 dark:bg-black/80" />
+
       {/* Modal */}
       <div
         ref={modalRef}
-        className="relative bg-white rounded-lg shadow-xl max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto"
+        className="relative bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 rounded-lg shadow-xl max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto border border-gray-200 dark:border-gray-700"
       >
+        
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b">
+        <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
           <h2 className="text-lg font-semibold">{title}</h2>
+
           <button
             onClick={onClose}
-            className="p-1 hover:bg-gray-100 rounded-full"
+            className="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition"
           >
             <X size={20} />
           </button>
         </div>
-        
+
         {/* Content */}
         <div className="p-4">
           {children}
         </div>
+
       </div>
     </div>
   );

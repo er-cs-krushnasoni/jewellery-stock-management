@@ -5,7 +5,8 @@ import { Card } from '../components/ui/card';
 import { Button } from "../components/ui/button";
 import { Input } from '../components/ui/input';
 import { Modal } from '../components/ui/modal';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, LineChart,Line,XAxis, YAxis, CartesianGrid,} from 'recharts'; 
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, LineChart,Line,XAxis, YAxis, CartesianGrid,} from 'recharts';
+import api from '../config/api'; 
 import { 
   Calendar, 
   Download, 
@@ -282,18 +283,24 @@ const fetchStockData = async (metalType = null) => {
     }
     
     // Fetch from metadata API
-    const metadataResponse = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/metadata`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      }
+    // const metadataResponse = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/metadata`, {
+    //   headers: {
+    //     'Authorization': `Bearer ${token}`,
+    //     'Content-Type': 'application/json'
+    //   }
+    // });
+    
+    // if (!metadataResponse.ok) {
+    //   throw new Error(`HTTP ${metadataResponse.status}: ${metadataResponse.statusText}`);
+    // }
+    
+    // const metadataData = await metadataResponse.json();
+
+    const metadataResponse = await api.get('/api/metadata', {
+      headers: { 'Authorization': `Bearer ${token}` }
     });
     
-    if (!metadataResponse.ok) {
-      throw new Error(`HTTP ${metadataResponse.status}: ${metadataResponse.statusText}`);
-    }
-    
-    const metadataData = await metadataResponse.json();
+    const metadataData = metadataResponse.data;
     
     console.log('Metadata received:', metadataData);
     
@@ -412,36 +419,25 @@ const handleDownload = async (reportType, format) => {
 
     setLoading(prev => ({ ...prev, [reportType.split('-')[0]]: true }));
 
-    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/reports/download`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify({
-        reportType,
-        format,
-        includeEntries: includeEntries,
-        ...(reportType.startsWith('stock-') && {
-          metalType: reportType.split('-')[1]
-        }),
-        ...(reportType === 'sales' && {
-          startDate: dateRange.startDate,
-          endDate: dateRange.endDate
-        }),
-        ...(reportType === 'customers' && {
-          fields: customerFields
-        })
+    const response = await api.post('/api/reports/download', {
+      reportType,
+      format,
+      includeEntries: includeEntries,
+      ...(reportType.startsWith('stock-') && {
+        metalType: reportType.split('-')[1]
+      }),
+      ...(reportType === 'sales' && {
+        startDate: dateRange.startDate,
+        endDate: dateRange.endDate
+      }),
+      ...(reportType === 'customers' && {
+        fields: customerFields
       })
+    }, {
+      headers: { 'Authorization': `Bearer ${token}` }
     });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Download API Error:', errorText);
-      throw new Error(`HTTP ${response.status}: Failed to generate report`);
-    }
-
-    const data = await response.json();
+    
+    const data = response.data;
 
     if (data.message && !data.downloadReady) {
       throw new Error(data.message);
@@ -1386,16 +1382,12 @@ const fetchSalesData = async (startDate = '', endDate = '') => {
       apiStartDate: formatDateForAPI(startDate),
       apiEndDate: formatDateForAPI(endDate)
     });
-    
-    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/reports/sales?${params}`, {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
+
+    const response = await api.get(`/api/reports/sales?${params}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
     });
     
-    if (!response.ok) throw new Error('Failed to fetch sales data');
-    
-    const data = await response.json();
+    const data = response.data;
     
     console.log('Sales API Response:', data);
     console.log('Sales Report Data:', data.salesReport);
@@ -2178,15 +2170,22 @@ const fetchCustomersData = async () => {
     params.append('includePurchaseAmount', customerFields.purchaseAmount.toString());
     params.append('includePurchaseItems', customerFields.purchaseItems.toString());
     
-    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/reports/customers?${params}`, {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
+    // const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/reports/customers?${params}`, {
+    //   headers: {
+    //     'Authorization': `Bearer ${token}`
+    //   }
+    // });
+    
+    // if (!response.ok) throw new Error('Failed to fetch customer data');
+    
+    // const data = await response.json();
+
+    const response = await api.get(`/api/reports/customers?${params}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
     });
     
-    if (!response.ok) throw new Error('Failed to fetch customer data');
-    
-    const data = await response.json();
+    const data = response.data;
+
     setCustomersData(data.customerReport);
   } catch (error) {
     setError('Failed to load customer data');
@@ -2215,35 +2214,23 @@ const handleCustomerDownload = async (format, customerFields) => {
     if (customerFields.purchaseAmount) fieldsToInclude.push('totalPurchaseAmount');
     if (customerFields.purchaseItems) fieldsToInclude.push('transactions'); // Changed to include transaction details
 
-    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/reports/download`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify({
-        reportType: 'customers',
-        format,
-        includeEntries: true,
-        fields: fieldsToInclude,
-        // Send field selection for filtering
-        fieldSelection: {
-          includeName: customerFields.name,
-          includeAddress: customerFields.address,
-          includeMobile: customerFields.mobile,
-          includePurchaseAmount: customerFields.purchaseAmount,
-          includePurchaseItems: customerFields.purchaseItems
-        }
-      })
+    const response = await api.post('/api/reports/download', {
+      reportType: 'customers',
+      format,
+      includeEntries: true,
+      fields: fieldsToInclude,
+      fieldSelection: {
+        includeName: customerFields.name,
+        includeAddress: customerFields.address,
+        includeMobile: customerFields.mobile,
+        includePurchaseAmount: customerFields.purchaseAmount,
+        includePurchaseItems: customerFields.purchaseItems
+      }
+    }, {
+      headers: { 'Authorization': `Bearer ${token}` }
     });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Customer Download API Error:', errorText);
-      throw new Error(`HTTP ${response.status}: Failed to generate customer report`);
-    }
-
-    const data = await response.json();
+    
+    const data = response.data;
 
     if (data.message && !data.downloadReady) {
       throw new Error(data.message);

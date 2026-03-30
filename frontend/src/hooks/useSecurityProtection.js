@@ -1,20 +1,28 @@
 // src/hooks/useSecurityProtection.js
 import { useEffect, useRef, useState } from 'react';
 
-// Trusted proxy origins — add production domain here when deploying
-const TRUSTED_ORIGINS = [
-  'http://localhost:8080',
-  'http://localhost:5173',
-  'http://127.0.0.1:8080',
-  'http://127.0.0.1:5173',
-];
+// Build trusted origins from env — works for local, tunnel, and production
+const buildTrustedOrigins = () => {
+  const origins = [
+    'http://localhost:8080',
+    'http://localhost:5173',
+    'http://127.0.0.1:8080',
+    'http://127.0.0.1:5173',
+  ];
+
+  // Add KaratCalc origin from env if set (covers tunnel + production)
+  const karatcalcOrigin = import.meta.env.VITE_KARATCALC_ORIGIN;
+  if (karatcalcOrigin && !origins.includes(karatcalcOrigin)) {
+    origins.push(karatcalcOrigin);
+  }
+
+  return origins;
+};
+
+const TRUSTED_ORIGINS = buildTrustedOrigins();
 
 const isInIframe = () => {
-  try {
-    return window.self !== window.top;
-  } catch (e) {
-    return true;
-  }
+  try { return window.self !== window.top; } catch (e) { return true; }
 };
 
 const isTrustedIframe = () => {
@@ -24,13 +32,16 @@ const isTrustedIframe = () => {
     const parentOrigin = window.parent.location.origin;
     return TRUSTED_ORIGINS.includes(parentOrigin);
   } catch (e) {
-    // Can't access parent.location — cross-origin.
-    // During development, referrer header tells us the parent origin.
-    // Also check if our own origin is localhost (we're being proxied).
+    // Cross-origin parent — can't read parent.location.origin
+    // This happens in tunnel/production. Check if our own origin
+    // is localhost (dev) or matches a known trusted pattern.
     const ownOrigin = window.location.origin;
-    const isLocalDev = ownOrigin.includes('localhost') ||
-                       ownOrigin.includes('127.0.0.1');
-    return isLocalDev;
+    const isLocalDev = ownOrigin.includes('localhost') || ownOrigin.includes('127.0.0.1');
+    // In tunnel/production the stock app's own origin is the tunnel/prod URL,
+    // but since it's being proxied it's actually running at the KaratCalc origin.
+    // The safest check: trust if VITE_KARATCALC_ORIGIN is set (env-configured system)
+    const isConfiguredSystem = !!import.meta.env.VITE_KARATCALC_ORIGIN;
+    return isLocalDev || isConfiguredSystem;
   }
 };
 
@@ -41,43 +52,26 @@ export const useSecurityProtection = () => {
   useEffect(() => {
     let isMounted = true;
 
-    // ── Iframe origin check ────────────────────────────────────────────
-    // NEVER hide the body when inside our trusted KaratCalc proxy.
-    // Only block embedding from genuinely untrusted external origins.
+    // ── Iframe trust check ───────────────────────────────────────────
     if (isInIframe() && !isTrustedIframe()) {
       document.body.style.display = 'none';
-      return; // Don't attach any other listeners either
+      return;
     }
 
-    // If we're in a trusted iframe, make sure body is visible
-    // (in case a previous render hid it)
+    // Ensure body is visible (in case previous render hid it)
     document.body.style.display = '';
 
-    // ── Security event handlers ────────────────────────────────────────
-
-    const handleContextMenu = (e) => {
-      e.preventDefault();
-      return false;
-    };
+    // ── Security handlers ────────────────────────────────────────────
+    const handleContextMenu = (e) => { e.preventDefault(); return false; };
 
     const handleKeyDown = (e) => {
       if (
         e.key === 'F12' ||
         (e.ctrlKey && e.shiftKey && ['I', 'J', 'C', 'i', 'j', 'c', 'K', 'k'].includes(e.key)) ||
         (e.ctrlKey && ['u', 'U'].includes(e.key))
-      ) {
-        e.preventDefault();
-        e.stopPropagation();
-        return false;
-      }
-      if (e.ctrlKey && ['s', 'S'].includes(e.key)) {
-        e.preventDefault();
-        return false;
-      }
-      if (e.ctrlKey && ['p', 'P'].includes(e.key)) {
-        e.preventDefault();
-        return false;
-      }
+      ) { e.preventDefault(); e.stopPropagation(); return false; }
+      if (e.ctrlKey && ['s', 'S'].includes(e.key)) { e.preventDefault(); return false; }
+      if (e.ctrlKey && ['p', 'P'].includes(e.key)) { e.preventDefault(); return false; }
     };
 
     const disableSelection = () => {
@@ -87,33 +81,16 @@ export const useSecurityProtection = () => {
       document.body.style.msUserSelect = 'none';
     };
 
-    const preventDragDrop = (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      return false;
-    };
+    const preventDragDrop = (e) => { e.preventDefault(); e.stopPropagation(); return false; };
+    const preventCopy = (e) => { e.preventDefault(); return false; };
 
-    const preventCopy = (e) => {
-      e.preventDefault();
-      return false;
-    };
-
-    // ── DevTools detection ─────────────────────────────────────────────
-    // NOTE: When running inside the KaratCalc iframe, DevTools is open on
-    // the PARENT window — the outer window dimensions change, not the iframe's.
-    // So outerWidth/outerHeight inside the iframe are the iframe's own dimensions
-    // and DevTools detection correctly does NOT trigger inside the iframe.
-    // For standalone access, this works normally.
     const detectDevTools = () => {
       if (!isMounted) return;
-      const widthThreshold = window.outerWidth - window.innerWidth > 160;
-      const heightThreshold = window.outerHeight - window.innerHeight > 160;
-      if (widthThreshold || heightThreshold) {
-        setIsProtected(true);
-      }
+      const w = window.outerWidth - window.innerWidth > 160;
+      const h = window.outerHeight - window.innerHeight > 160;
+      if (w || h) setIsProtected(true);
     };
 
-    // Apply protections
     document.addEventListener('contextmenu', handleContextMenu, { capture: true, passive: false });
     document.addEventListener('keydown', handleKeyDown, { capture: true, passive: false });
     document.addEventListener('dragstart', preventDragDrop, { capture: true, passive: false });
@@ -127,7 +104,6 @@ export const useSecurityProtection = () => {
 
     return () => {
       isMounted = false;
-
       document.removeEventListener('contextmenu', handleContextMenu, { capture: true });
       document.removeEventListener('keydown', handleKeyDown, { capture: true });
       document.removeEventListener('dragstart', preventDragDrop, { capture: true });
@@ -135,16 +111,10 @@ export const useSecurityProtection = () => {
       document.removeEventListener('copy', preventCopy, { capture: true });
       document.removeEventListener('cut', preventCopy, { capture: true });
       document.removeEventListener('paste', preventCopy, { capture: true });
-
       document.body.style.userSelect = '';
       document.body.style.webkitUserSelect = '';
-      document.body.style.mozUserSelect = '';
-      document.body.style.msUserSelect = '';
       document.body.style.display = '';
-
-      if (checkIntervalRef.current) {
-        clearInterval(checkIntervalRef.current);
-      }
+      if (checkIntervalRef.current) clearInterval(checkIntervalRef.current);
     };
   }, []);
 
