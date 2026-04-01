@@ -19,16 +19,14 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     const storedToken = localStorage.getItem("token");
-    if (storedToken) {
-      setToken(storedToken);
-    }
+    if (storedToken) setToken(storedToken);
 
     try {
       const storedUser = localStorage.getItem("user");
       if (storedUser && storedUser !== "undefined" && storedUser !== "null") {
         setUser(JSON.parse(storedUser));
       }
-    } catch (error) {
+    } catch {
       localStorage.removeItem("user");
       setUser(null);
     }
@@ -45,14 +43,9 @@ export const AuthProvider = ({ children }) => {
       navigate("/login");
     };
 
-    // Direct access only: clear session on tab close/refresh
-    // Inside iframe: HiddenProject.tsx handles cleanup on exit,
-    // and beforeunload fires on every proxied page navigation
-    // which would log the user out on every route change
     if (!isInIframe()) {
       window.addEventListener("beforeunload", clearSession);
     }
-
     window.addEventListener("popstate", handleBackNavigation);
 
     return () => {
@@ -63,13 +56,18 @@ export const AuthProvider = ({ children }) => {
     };
   }, [navigate]);
 
-  const login = (token, user) => {
+  const login = (token, userData) => {
     setToken(token);
-    setUser(user);
+    setUser(userData);
     localStorage.setItem("token", token);
-    localStorage.setItem("user", JSON.stringify(user));
-    // With correct basename, this navigates to the right /sales in both contexts
-    navigate("/sales");
+    localStorage.setItem("user", JSON.stringify(userData));
+
+    // Admins go to /admin, regular users go to /sales
+    if (userData?.isAdmin) {
+      navigate("/admin");
+    } else {
+      navigate("/sales");
+    }
   };
 
   const logout = () => {

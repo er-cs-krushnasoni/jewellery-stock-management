@@ -11,6 +11,8 @@ const userRoutes = require("./routes/users");
 const salesRoutes = require("./routes/sales");
 const configRoutes = require("./routes/config");
 const reportsRouter = require('./routes/reports');
+const adminRoutes = require("./routes/admin");                      // ← NEW
+const subscriptionScheduler = require("./utils/subscriptionScheduler"); // ← NEW
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -18,9 +20,6 @@ const PORT = process.env.PORT || 5000;
 const SECRET_API_KEY = process.env.SECRET_API_KEY || 'your-super-secret-key-12345';
 const ENABLE_API_KEY_CHECK = process.env.ENABLE_API_KEY_CHECK === 'true';
 
-// ── Build allowed origins from env ───────────────────────────────────────
-// ALLOWED_ORIGINS is a comma-separated list in .env
-// Falls back to localhost defaults if not set
 const buildAllowedOrigins = () => {
   const defaults = [
     'http://localhost:5173',
@@ -28,29 +27,23 @@ const buildAllowedOrigins = () => {
     'http://127.0.0.1:5173',
     'http://127.0.0.1:8080',
   ];
-
   if (process.env.ALLOWED_ORIGINS) {
     const envOrigins = process.env.ALLOWED_ORIGINS
       .split(',')
       .map(o => o.trim())
       .filter(Boolean);
-    // Merge env origins with defaults (deduped)
     return [...new Set([...defaults, ...envOrigins])];
   }
-
   return defaults;
 };
 
 const allowedOrigins = buildAllowedOrigins();
-
 console.log('🌐 Allowed origins:', allowedOrigins.join(', '));
 
 // ── Optional API Key Middleware ──────────────────────────────────────────
 app.use((req, res, next) => {
   const apiKey = req.headers['x-api-secret-key'];
-
   if (req.path === '/api/health') return next();
-
   if (apiKey) {
     if (apiKey !== SECRET_API_KEY) {
       console.log('❌ Invalid API key provided');
@@ -60,22 +53,17 @@ app.use((req, res, next) => {
   } else {
     console.log('🌐 Direct access (no API key) - Allowed');
   }
-
   next();
 });
 
 // ── CORS ─────────────────────────────────────────────────────────────────
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow no-origin requests (mobile apps, Postman, curl)
     if (!origin) return callback(null, true);
-
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
       console.log('🚫 CORS blocked origin:', origin);
-      // In development allow anyway but log it
-      // In production you may want: callback(new Error('Not allowed by CORS'))
       callback(null, process.env.NODE_ENV !== 'production');
     }
   },
@@ -90,28 +78,21 @@ const corsOptions = {
   preflightContinue: false,
   optionsSuccessStatus: 204,
 };
-
 app.use(cors(corsOptions));
 
-// ── Additional CORS headers for iframe compatibility ─────────────────────
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-
   if (origin && allowedOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   }
-
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
   res.setHeader('Access-Control-Allow-Headers',
     'Content-Type, Authorization, X-Requested-With, Accept, Origin, X-API-Secret-Key');
-
   if (req.method === 'OPTIONS') return res.status(204).end();
-
   next();
 });
 
-// ── Security headers ─────────────────────────────────────────────────────
 app.use((req, res, next) => {
   res.removeHeader('X-Powered-By');
   res.setHeader('X-Frame-Options', 'ALLOWALL');
@@ -122,7 +103,6 @@ app.use((req, res, next) => {
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ── Request logger ───────────────────────────────────────────────────────
 app.use((req, res, next) => {
   const icon = req.headers['x-api-secret-key'] ? '🔐' : '🌐';
   console.log(`${icon} ${req.method} ${req.path} - Origin: ${req.headers.origin || 'none'}`);
@@ -140,6 +120,7 @@ app.get('/api/health', (req, res) => {
 });
 
 // ── Routes ───────────────────────────────────────────────────────────────
+app.use("/api/admin", adminRoutes);       // ← NEW (before /api/users to avoid conflicts)
 app.use("/api/users", userRoutes);
 app.use("/api/auth", authRoutes);
 app.use('/api/entries', entriesRouter);
@@ -173,6 +154,9 @@ mongoose.connect(process.env.MONGO_URI, {
     console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
     console.log(`🔐 API key check: ${ENABLE_API_KEY_CHECK ? 'ENABLED' : 'DISABLED'}`);
   });
+
+  // ── Start subscription scheduler ──────────────────────────────────────
+  subscriptionScheduler.start();   // ← NEW
 })
 .catch((err) => {
   console.error("❌ MongoDB connection error:", err);
