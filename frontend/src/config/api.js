@@ -27,13 +27,9 @@ if (inIframe) {
   window.addEventListener('message', (event) => {
     if (event.data && event.data.type === 'PROXY_CONFIG') {
       const backendProxy = event.data.backendProxy || '/hidden-api';
-      let cleanBase;
-      try {
-        cleanBase = new URL(backendProxy).pathname;
-      } catch {
-        cleanBase = backendProxy.startsWith('/') ? backendProxy : '/' + backendProxy;
-      }
-      api.defaults.baseURL = cleanBase;
+      // Use the full URL as-is — Railway absolute URL or relative path
+      // Do NOT strip to pathname — that breaks absolute Railway URLs
+      api.defaults.baseURL = backendProxy;
     }
   });
 }
