@@ -10,6 +10,7 @@ export default function Login() {
   const [error, setError] = useState("");
   const [subscriptionExpired, setSubscriptionExpired] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const { login } = useAuth();
 
@@ -17,6 +18,7 @@ export default function Login() {
     e.preventDefault();
     setError("");
     setSubscriptionExpired(false);
+    setLoading(true);
 
     try {
       const response = await api.post("/api/auth/login", {
@@ -38,6 +40,8 @@ export default function Login() {
       } else {
         setError(data?.message || "Login failed");
       }
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -115,9 +119,36 @@ export default function Login() {
 
         <button
           type="submit"
-          className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-medium py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 focus:ring-4 focus:ring-blue-500/20 dark:from-blue-500 dark:to-blue-600 dark:hover:from-blue-600 dark:hover:to-blue-700"
+          disabled={loading}
+          className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-medium py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 focus:ring-4 focus:ring-blue-500/20 dark:from-blue-500 dark:to-blue-600 dark:hover:from-blue-600 dark:hover:to-blue-700 disabled:opacity-70 disabled:cursor-not-allowed disabled:transform-none disabled:hover:shadow-lg"
         >
-          Sign In
+          {loading ? (
+            <span className="flex items-center justify-center gap-2">
+              <svg
+                className="animate-spin h-5 w-5 text-white"
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                />
+              </svg>
+              Signing in...
+            </span>
+          ) : (
+            "Sign In"
+          )}
         </button>
       </form>
     </div>
