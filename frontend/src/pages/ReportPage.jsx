@@ -25,13 +25,7 @@ import {
 // Convert DD/MM/YYYY to ISO date (YYYY-MM-DD) for API
 const formatDateForAPI = (displayDate) => {
   if (!displayDate) return '';
-  
-  // If it's already in ISO format, return as is
-  if (displayDate.includes('-') && displayDate.length === 10) {
-    return displayDate;
-  }
-  
-  // Convert DD/MM/YYYY to YYYY-MM-DD
+  if (displayDate.includes('-') && displayDate.length === 10) return displayDate;
   const [day, month, year] = displayDate.split('/');
   return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
 };
@@ -48,13 +42,7 @@ const formatDateObjectForDisplay = (dateObj) => {
 // Convert ISO date (YYYY-MM-DD) to DD/MM/YYYY for display
 const formatDateForDisplay = (isoDate) => {
   if (!isoDate) return '';
-  
-  // If it's already in DD/MM/YYYY format, return as is
-  if (isoDate.includes('/') && isoDate.length === 10) {
-    return isoDate;
-  }
-  
-  // Convert YYYY-MM-DD to DD/MM/YYYY
+  if (isoDate.includes('/') && isoDate.length === 10) return isoDate;
   const [year, month, day] = isoDate.split('-');
   return `${day}/${month}/${year}`;
 };
@@ -62,171 +50,156 @@ const formatDateForDisplay = (isoDate) => {
 // Format date from API response for display
 const formatAPIDateForDisplay = (dateString) => {
   if (!dateString) return '';
-  
   const date = new Date(dateString);
   if (isNaN(date.getTime())) return '';
-  
   return formatDateObjectForDisplay(date);
 };
 
+// ── Universal download helper ─────────────────────────────────────────────
+// Works in browser, Capacitor Android, and Electron
+const downloadFile = async (blob, filename) => {
+  const isCapacitorApp =
+    typeof window !== 'undefined' &&
+    typeof window.Capacitor !== 'undefined' &&
+    window.Capacitor.isNativePlatform?.();
+
+  if (isCapacitorApp && navigator.share) {
+    try {
+      const file = new File([blob], filename, { type: blob.type });
+      await navigator.share({ files: [file], title: filename });
+      return;
+    } catch (err) {
+      if (err.name === 'AbortError') return; // user cancelled
+      // fall through to normal download
+    }
+  }
+
+  // Normal browser / Electron download
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+};
+
+// ── Helper: save jsPDF doc (handles Capacitor) ────────────────────────────
+const saveDoc = async (doc, filename) => {
+  const isCapacitorApp =
+    typeof window !== 'undefined' &&
+    typeof window.Capacitor !== 'undefined' &&
+    window.Capacitor.isNativePlatform?.();
+
+  if (isCapacitorApp && navigator.share) {
+    const pdfBlob = doc.output('blob');
+    await downloadFile(pdfBlob, filename);
+  } else {
+    doc.save(filename);
+  }
+};
+
+// ── Helper: save XLSX workbook (handles Capacitor) ────────────────────────
+const saveWorkbook = async (wb, filename) => {
+  const isCapacitorApp =
+    typeof window !== 'undefined' &&
+    typeof window.Capacitor !== 'undefined' &&
+    window.Capacitor.isNativePlatform?.();
+
+  if (isCapacitorApp && navigator.share) {
+    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([wbout], { type: 'application/octet-stream' });
+    await downloadFile(blob, filename);
+  } else {
+    XLSX.writeFile(wb, filename);
+  }
+};
 
 const ReportPage = () => {
   const { user } = useAuth();
   
-  // State management
   const [stockData, setStockData] = useState(null);
   const [salesData, setSalesData] = useState(null);
   const [customersData, setCustomersData] = useState(null);
   const [jsPDFLoaded, setJsPDFLoaded] = useState(false);
-  const [loading, setLoading] = useState({
-    stock: false,
-    sales: false,
-    customers: false
-  });
+  const [loading, setLoading] = useState({ stock: false, sales: false, customers: false });
   
-
-  
-  // Customer report filters
   const [customerFields, setCustomerFields] = useState({
-    name: true,
-    address: true,
-    mobile: true,
-    purchaseAmount: true,
-    purchaseItems: false  // New field added
+    name: true, address: true, mobile: true,
+    purchaseAmount: true, purchaseItems: false
   });
   
-  // Modal states
-  const [downloadModal, setDownloadModal] = useState({
-    open: false,
-    type: '',
-    data: null
-  });
-
-  const [categoryData, setCategoryData] = useState({
-    gold: [],
-    silver: []
-  });
-  
+  const [downloadModal, setDownloadModal] = useState({ open: false, type: '', data: null });
+  const [categoryData, setCategoryData] = useState({ gold: [], silver: [] });
   const [includeEntries, setIncludeEntries] = useState(false);
   const [error, setError] = useState('');
   
-
   const COLORS = [
-    '#8884d8', '#82ca9d', '#ffc658', '#ff7300', '#00ff00', 
+    '#8884d8', '#82ca9d', '#ffc658', '#ff7300', '#00ff00',
     '#0088fe', '#00c49f', '#ffbb28', '#ff8042', '#8dd1e1'
   ];
+
   const renderLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, name }) => {
-    
     const RADIAN = Math.PI / 180;
-    const radius = outerRadius + 30; // Position label outside the pie
+    const radius = outerRadius + 30;
     const x = cx + radius * Math.cos(-midAngle * RADIAN);
     const y = cy + radius * Math.sin(-midAngle * RADIAN);
-  
     return (
-      <text 
-        x={x} 
-        y={y} 
-        fill="#374151" 
-        textAnchor={x > cx ? 'start' : 'end'} 
-        dominantBaseline="central"
-        fontSize="12"
-        fontWeight="500"
-      >
+      <text x={x} y={y} fill="#374151" textAnchor={x > cx ? 'start' : 'end'}
+        dominantBaseline="central" fontSize="12" fontWeight="500">
         {`${name}: ${(percent * 100).toFixed(1)}%`}
       </text>
     );
   };
 
-  // Load jsPDF library
+  // ── Load jsPDF ────────────────────────────────────────────────────────
   const loadJsPDF = () => {
     return new Promise((resolve, reject) => {
-      // Check if already loaded
-      const existingJsPDF = window.jsPDF || window.jspdf || 
-                           (window.jsPDF && window.jsPDF.jsPDF) || 
-                           (window.jspdf && window.jspdf.jsPDF);
-      
-      if (existingJsPDF) {
-        console.log('jsPDF already loaded');
-        setJsPDFLoaded(true);
-        resolve();
-        return;
-      }
-  
-      // Remove any existing jsPDF script tags
+      const existingJsPDF = window.jsPDF || window.jspdf ||
+        (window.jsPDF && window.jsPDF.jsPDF) ||
+        (window.jspdf && window.jspdf.jsPDF);
+      if (existingJsPDF) { setJsPDFLoaded(true); resolve(); return; }
+
       const existingScripts = document.querySelectorAll('script[src*="jspdf"]');
       existingScripts.forEach(script => script.remove());
-  
-      // Create script element with a more reliable CDN
+
       const script = document.createElement('script');
       script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
       script.async = true;
       script.crossOrigin = 'anonymous';
-      
+
       script.onload = () => {
-        console.log('jsPDF script loaded');
-        
-        // Give more time for the library to fully initialize
         setTimeout(() => {
-          // Check for jsPDF in various possible locations
-          const jsPDFConstructor = window.jsPDF || window.jspdf || 
-                                  (window.jsPDF && window.jsPDF.jsPDF) || 
-                                  (window.jspdf && window.jspdf.jsPDF);
-          
-          console.log('Available PDF properties:', Object.keys(window).filter(key => 
-            key.toLowerCase().includes('pdf') || key.toLowerCase().includes('jspdf')
-          ));
-          
-          if (jsPDFConstructor) {
-            console.log('jsPDF constructor found:', typeof jsPDFConstructor);
-            setJsPDFLoaded(true);
-            resolve();
-          } else {
-            console.error('jsPDF constructor not found after loading');
-            reject(new Error('jsPDF failed to load properly'));
-          }
-        }, 500); // Increased timeout to 500ms
+          const jsPDFConstructor = window.jsPDF || window.jspdf ||
+            (window.jsPDF && window.jsPDF.jsPDF) || (window.jspdf && window.jspdf.jsPDF);
+          if (jsPDFConstructor) { setJsPDFLoaded(true); resolve(); }
+          else reject(new Error('jsPDF failed to load properly'));
+        }, 500);
       };
-      
-      script.onerror = (error) => {
-        console.error('Failed to load jsPDF script from primary CDN:', error);
-        
-        // Try alternative CDN
+
+      script.onerror = () => {
         const altScript = document.createElement('script');
         altScript.src = 'https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js';
         altScript.async = true;
         altScript.crossOrigin = 'anonymous';
-        
         altScript.onload = () => {
-          console.log('jsPDF loaded from alternative CDN');
           setTimeout(() => {
-            const jsPDFConstructor = window.jsPDF || window.jspdf || 
-                                    (window.jsPDF && window.jsPDF.jsPDF) || 
-                                    (window.jspdf && window.jspdf.jsPDF);
-            
-            if (jsPDFConstructor) {
-              console.log('jsPDF constructor found from alt CDN');
-              setJsPDFLoaded(true);
-              resolve();
-            } else {
-              reject(new Error('jsPDF failed to load from both CDNs'));
-            }
+            const jsPDFConstructor = window.jsPDF || window.jspdf ||
+              (window.jsPDF && window.jsPDF.jsPDF) || (window.jspdf && window.jspdf.jsPDF);
+            if (jsPDFConstructor) { setJsPDFLoaded(true); resolve(); }
+            else reject(new Error('jsPDF failed to load from both CDNs'));
           }, 500);
         };
-        
-        altScript.onerror = () => {
-          reject(new Error('Failed to load jsPDF library from both CDNs'));
-        };
-        
-        // Remove the failed script and add the alternative
+        altScript.onerror = () => reject(new Error('Failed to load jsPDF from both CDNs'));
         script.remove();
         document.head.appendChild(altScript);
       };
-      
+
       document.head.appendChild(script);
     });
   };
 
-  // Initialize jsPDF on component mount
   useEffect(() => {
     loadJsPDF().catch(err => {
       console.error('Failed to load jsPDF:', err);
@@ -234,431 +207,252 @@ const ReportPage = () => {
     });
   }, []);
 
-  // Fetch stock data
-const processStockDataForCharts = (stockData) => {
+  // ── Process stock data for charts ─────────────────────────────────────
+  const processStockDataForCharts = (stockData) => {
     const goldCategories = [];
     const silverCategories = [];
-  
-    // Process gold categories - only add if pureWeight > 0
     if (stockData.gold && stockData.gold.categories) {
       Object.entries(stockData.gold.categories).forEach(([categoryName, categoryData]) => {
         const pureWeight = parseFloat(categoryData.pureWeight) || 0;
-        if (pureWeight > 0) {
-          goldCategories.push({
-            name: categoryName,
-            value: pureWeight
-          });
-        }
+        if (pureWeight > 0) goldCategories.push({ name: categoryName, value: pureWeight });
       });
     }
-  
-    // Process silver categories - only add if pureWeight > 0
     if (stockData.silver && stockData.silver.categories) {
       Object.entries(stockData.silver.categories).forEach(([categoryName, categoryData]) => {
         const pureWeight = parseFloat(categoryData.pureWeight) || 0;
-        if (pureWeight > 0) {
-          silverCategories.push({
-            name: categoryName,
-            value: pureWeight
-          });
-        }
+        if (pureWeight > 0) silverCategories.push({ name: categoryName, value: pureWeight });
       });
     }
-  
-    console.log('Processed gold categories:', goldCategories);
-    console.log('Processed silver categories:', silverCategories);
-  
-    return {
-      gold: goldCategories,
-      silver: silverCategories
-    };
-};
+    return { gold: goldCategories, silver: silverCategories };
+  };
 
-const fetchStockData = async (metalType = null) => {
-  setLoading(prev => ({ ...prev, stock: true }));
-  try {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      throw new Error('No authentication token found');
-    }
-    
-    // Fetch from metadata API
-    // const metadataResponse = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/metadata`, {
-    //   headers: {
-    //     'Authorization': `Bearer ${token}`,
-    //     'Content-Type': 'application/json'
-    //   }
-    // });
-    
-    // if (!metadataResponse.ok) {
-    //   throw new Error(`HTTP ${metadataResponse.status}: ${metadataResponse.statusText}`);
-    // }
-    
-    // const metadataData = await metadataResponse.json();
-
-    const metadataResponse = await api.get('/api/metadata', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    
-    const metadataData = metadataResponse.data;
-    
-    console.log('Metadata received:', metadataData);
-    
-    // Process metadata for stock display
-    const processedData = {
-      gold: {
-        totalGross: metadataData.totalGoldGross || 0,
-        totalPure: metadataData.totalGoldPure || 0,
-        averagePurity: metadataData.totalGoldGross > 0 ? 
-          ((metadataData.totalGoldPure / metadataData.totalGoldGross) * 100).toFixed(2) : 0,
-        categories: {}
-      },
-      silver: {
-        totalGross: metadataData.totalSilverGross || 0,
-        totalPure: metadataData.totalSilverPure || 0,
-        averagePurity: metadataData.totalSilverGross > 0 ? 
-          ((metadataData.totalSilverPure / metadataData.totalSilverGross) * 100).toFixed(2) : 0,
-        categories: {}
-      }
-    };
-    
-    // Process category data - THIS IS THE FIX
-    const goldCategories = [];
-    const silverCategories = [];
-    
-    if (metadataData.categoryTotals) {
-      Object.entries(metadataData.categoryTotals).forEach(([categoryKey, categoryData]) => {
-        const { pureWeight, metal, grossWeight, totalItems, categoryName, purities } = categoryData;
-        
-        // Calculate average purity for this category
-        let averagePurity = 0;
-        if (grossWeight > 0) {
-          averagePurity = (pureWeight / grossWeight) * 100;
-        }
-        
-        const processedCategoryData = {
-          grossWeight: grossWeight || 0,
-          pureWeight: pureWeight || 0,
-          totalItems: totalItems || 0,
-          averagePurity: averagePurity.toFixed(2),
-          purities: purities || {} // Include the purities data
-        };
-        
-        // Use categoryName instead of the full categoryKey
-        const displayName = categoryName || categoryKey.split('_')[0]; // fallback to first part if no categoryName
-        
-        if (metal === "gold" && pureWeight > 0) {
-          goldCategories.push({ name: displayName, value: pureWeight });
-          processedData.gold.categories[displayName] = processedCategoryData;
-        } else if (metal === "silver" && pureWeight > 0) {
-          silverCategories.push({ name: displayName, value: pureWeight });
-          processedData.silver.categories[displayName] = processedCategoryData;
-        }
-      });
-    }
-    
-    // Set the main stock data
-    setStockData(processedData);
-    
-    // Set category data for pie charts
-    setCategoryData({
-      gold: goldCategories,
-      silver: silverCategories
-    });
-    
-    console.log('Processed stock data:', processedData);
-    console.log('Category data for charts:', { gold: goldCategories, silver: silverCategories });
-    
-  } catch (error) {
-    setError('Failed to load stock data');
-    console.error('Stock data error:', error);
-  } finally {
-    setLoading(prev => ({ ...prev, stock: false }));
-  }
-};
-
-// Helper function to generate filename
-const getFilename = (reportType, format, timestamp = null) => {
-  const extension = format === 'pdf' ? 'pdf' : 'xlsx';
-  
-  // Use current date if no timestamp provided, or create date from timestamp
-  const date = timestamp ? new Date(timestamp) : new Date();
-  
-  // Format date to dd/mm/yyyy
-  const day = String(date.getDate()).padStart(2, '0');
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const year = date.getFullYear();
-  const formattedDate = `${day}/${month}/${year}`;
-  
-  // Replace forward slashes with underscores or dashes for filename safety
-  const filenameSafeDate = formattedDate.replace(/\//g, '-');
-  
-  switch (reportType) {
-    case 'stock-gold':
-      return `gold_inventory_${filenameSafeDate}.${extension}`;
-    case 'stock-silver':
-      return `silver_inventory_${filenameSafeDate}.${extension}`;
-    case 'stock-full':
-      return `full_inventory_${filenameSafeDate}.${extension}`;
-    case 'sales':
-      return `sales_report_${filenameSafeDate}.${extension}`;
-    case 'customers':
-      return `customer_list_${filenameSafeDate}.${extension}`;
-    default:
-      return `report_${filenameSafeDate}.${extension}`;
-  }
-};
-
-const handleDownload = async (reportType, format) => {
-  try {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      setError('Authentication token not found. Please login again.');
-      return;
-    }
-
-    setLoading(prev => ({ ...prev, [reportType.split('-')[0]]: true }));
-
-    const response = await api.post('/api/reports/download', {
-      reportType,
-      format,
-      includeEntries: includeEntries,
-      ...(reportType.startsWith('stock-') && {
-        metalType: reportType.split('-')[1]
-      }),
-      ...(reportType === 'sales' && {
-        startDate: dateRange.startDate,
-        endDate: dateRange.endDate
-      }),
-      ...(reportType === 'customers' && {
-        fields: customerFields
-      })
-    }, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    
-    const data = response.data;
-
-    if (data.message && !data.downloadReady) {
-      throw new Error(data.message);
-    }
-
-    if (data.downloadReady && data.downloadData) {
-      // Pass current timestamp to getFilename
-      const currentTimestamp = new Date().getTime();
-      let filename = getFilename(reportType, format, currentTimestamp);
-      
-      let reportData = data.downloadData.data;
-      
-      console.log('Report data for download:', reportData);
-      
-      // Handle different report types
-      if (reportType === 'sales') {
-        if (format === 'pdf') {
-          await generateSalesPDFReport(reportData, filename);
-        } else if (format === 'excel') {
-          downloadSalesExcel(reportData);
-        }
-      } else if (reportType === 'customers') {
-        // Handle customer reports with selected fields
-        if (format === 'pdf') {
-          await generateCustomerPDFReport(reportData, filename, customerFields);
-        } else if (format === 'excel') {
-          generateCustomerExcelReport(reportData, filename, customerFields);
-        }
-      } else {
-        // Handle stock reports
-        if (format === 'pdf') {
-          await generatePDFFromData(reportData, reportType, filename);
-        } else if (format === 'excel') {
-          generateExcelFromData(reportData, reportType, filename);
-        }
-      }
-      
-      setDownloadModal({ open: false, type: '', data: null });
-      alert(`${format.toUpperCase()} report downloaded successfully!`);
-      return;
-    }
-    
-  } catch (error) {
-    console.error('Download error:', error);
-    setError(`Failed to download report: ${error.message}`);
-    alert(`Download failed: ${error.message}`);
-  } finally {
-    setLoading(prev => ({
-      ...prev,
-      stock: false,
-      sales: false,
-      customers: false
-    }));
-  }
-};
-// Usage
-const filename = getFilename('stock-gold', 'pdf', new Date());
-const generatePDFFromData = async (data, reportType, filename) => {
+  // ── Fetch stock data ──────────────────────────────────────────────────
+  const fetchStockData = async (metalType = null) => {
+    setLoading(prev => ({ ...prev, stock: true }));
     try {
-      // Ensure jsPDF is loaded
-      if (!jsPDFLoaded) {
-        console.log('jsPDF not loaded, attempting to load...');
-        await loadJsPDF();
+      const token = localStorage.getItem('token');
+      if (!token) throw new Error('No authentication token found');
+
+      const metadataResponse = await api.get('/api/metadata', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const metadataData = metadataResponse.data;
+
+      const processedData = {
+        gold: {
+          totalGross: metadataData.totalGoldGross || 0,
+          totalPure: metadataData.totalGoldPure || 0,
+          averagePurity: metadataData.totalGoldGross > 0 ?
+            ((metadataData.totalGoldPure / metadataData.totalGoldGross) * 100).toFixed(2) : 0,
+          categories: {}
+        },
+        silver: {
+          totalGross: metadataData.totalSilverGross || 0,
+          totalPure: metadataData.totalSilverPure || 0,
+          averagePurity: metadataData.totalSilverGross > 0 ?
+            ((metadataData.totalSilverPure / metadataData.totalSilverGross) * 100).toFixed(2) : 0,
+          categories: {}
+        }
+      };
+
+      const goldCategories = [];
+      const silverCategories = [];
+
+      if (metadataData.categoryTotals) {
+        Object.entries(metadataData.categoryTotals).forEach(([categoryKey, categoryData]) => {
+          const { pureWeight, metal, grossWeight, totalItems, categoryName, purities } = categoryData;
+          let averagePurity = grossWeight > 0 ? (pureWeight / grossWeight) * 100 : 0;
+          const processedCategoryData = {
+            grossWeight: grossWeight || 0, pureWeight: pureWeight || 0,
+            totalItems: totalItems || 0, averagePurity: averagePurity.toFixed(2),
+            purities: purities || {}
+          };
+          const displayName = categoryName || categoryKey.split('_')[0];
+          if (metal === "gold" && pureWeight > 0) {
+            goldCategories.push({ name: displayName, value: pureWeight });
+            processedData.gold.categories[displayName] = processedCategoryData;
+          } else if (metal === "silver" && pureWeight > 0) {
+            silverCategories.push({ name: displayName, value: pureWeight });
+            processedData.silver.categories[displayName] = processedCategoryData;
+          }
+        });
       }
-  
-      // Try to find jsPDF constructor with extensive checking
+
+      setStockData(processedData);
+      setCategoryData({ gold: goldCategories, silver: silverCategories });
+    } catch (error) {
+      setError('Failed to load stock data');
+      console.error('Stock data error:', error);
+    } finally {
+      setLoading(prev => ({ ...prev, stock: false }));
+    }
+  };
+
+  // ── Filename helper ───────────────────────────────────────────────────
+  const getFilename = (reportType, format, timestamp = null) => {
+    const extension = format === 'pdf' ? 'pdf' : 'xlsx';
+    const date = timestamp ? new Date(timestamp) : new Date();
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    const filenameSafeDate = `${day}-${month}-${year}`;
+    switch (reportType) {
+      case 'stock-gold':     return `gold_inventory_${filenameSafeDate}.${extension}`;
+      case 'stock-silver':   return `silver_inventory_${filenameSafeDate}.${extension}`;
+      case 'stock-full':     return `full_inventory_${filenameSafeDate}.${extension}`;
+      case 'sales':          return `sales_report_${filenameSafeDate}.${extension}`;
+      case 'customers':      return `customer_list_${filenameSafeDate}.${extension}`;
+      default:               return `report_${filenameSafeDate}.${extension}`;
+    }
+  };
+
+  const filename = getFilename('stock-gold', 'pdf', new Date());
+
+  // ── Handle download ───────────────────────────────────────────────────
+  const handleDownload = async (reportType, format) => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) { setError('Authentication token not found. Please login again.'); return; }
+      setLoading(prev => ({ ...prev, [reportType.split('-')[0]]: true }));
+
+      const response = await api.post('/api/reports/download', {
+        reportType, format,
+        includeEntries: includeEntries,
+        ...(reportType.startsWith('stock-') && { metalType: reportType.split('-')[1] }),
+        ...(reportType === 'sales' && { startDate: dateRange.startDate, endDate: dateRange.endDate }),
+        ...(reportType === 'customers' && { fields: customerFields })
+      }, { headers: { 'Authorization': `Bearer ${token}` } });
+
+      const data = response.data;
+      if (data.message && !data.downloadReady) throw new Error(data.message);
+
+      if (data.downloadReady && data.downloadData) {
+        const currentTimestamp = new Date().getTime();
+        let filename = getFilename(reportType, format, currentTimestamp);
+        let reportData = data.downloadData.data;
+
+        if (reportType === 'sales') {
+          if (format === 'pdf') await generateSalesPDFReport(reportData, filename);
+          else if (format === 'excel') await downloadSalesExcel(reportData);
+        } else if (reportType === 'customers') {
+          if (format === 'pdf') await generateCustomerPDFReport(reportData, filename, customerFields);
+          else if (format === 'excel') await generateCustomerExcelReport(reportData, filename, customerFields);
+        } else {
+          if (format === 'pdf') await generatePDFFromData(reportData, reportType, filename);
+          else if (format === 'excel') await generateExcelFromData(reportData, reportType, filename);
+        }
+
+        setDownloadModal({ open: false, type: '', data: null });
+        alert(`${format.toUpperCase()} report downloaded successfully!`);
+        return;
+      }
+    } catch (error) {
+      console.error('Download error:', error);
+      setError(`Failed to download report: ${error.message}`);
+      alert(`Download failed: ${error.message}`);
+    } finally {
+      setLoading(prev => ({ ...prev, stock: false, sales: false, customers: false }));
+    }
+  };
+
+  // ── Generate PDF from data ────────────────────────────────────────────
+  const generatePDFFromData = async (data, reportType, filename) => {
+    try {
+      if (!jsPDFLoaded) await loadJsPDF();
+
       let jsPDFConstructor = null;
-      
-      // Method 1: Direct window properties
-      if (window.jsPDF) {
-        jsPDFConstructor = window.jsPDF.jsPDF || window.jsPDF;
-      } else if (window.jspdf) {
-        jsPDFConstructor = window.jspdf.jsPDF || window.jspdf;
-      }
-      
-      // Method 2: Check global namespace
-      if (!jsPDFConstructor && typeof jsPDF !== 'undefined') {
-        jsPDFConstructor = jsPDF;
-      }
-      
-      // Method 3: Check for UMD pattern
-      if (!jsPDFConstructor && window.jsPDF && typeof window.jsPDF === 'object') {
-        jsPDFConstructor = window.jsPDF.jsPDF;
-      }
-      
-      console.log('jsPDF constructor type:', typeof jsPDFConstructor);
-      console.log('Available window PDF properties:', Object.keys(window).filter(key => 
-        key.toLowerCase().includes('pdf')
-      ));
-      
+      if (window.jsPDF) jsPDFConstructor = window.jsPDF.jsPDF || window.jsPDF;
+      else if (window.jspdf) jsPDFConstructor = window.jspdf.jsPDF || window.jspdf;
+      if (!jsPDFConstructor && typeof jsPDF !== 'undefined') jsPDFConstructor = jsPDF;
+
       if (!jsPDFConstructor || typeof jsPDFConstructor !== 'function') {
         throw new Error('PDF library could not be loaded. Please check your internet connection and try again.');
       }
-  
-      // Create PDF document
+
       const doc = new jsPDFConstructor();
-      
-      // Set up PDF styling
       const pageWidth = doc.internal.pageSize.width;
       const pageHeight = doc.internal.pageSize.height;
       const margin = 20;
       let yPosition = margin;
-  
-      // Helper function to check if we need a new page
+
       const checkNewPage = (linesNeeded = 1) => {
-        const lineHeight = 6;
-        if (yPosition + (linesNeeded * lineHeight) > pageHeight - margin) {
-          doc.addPage();
-          yPosition = margin;
-          return true;
+        if (yPosition + (linesNeeded * 6) > pageHeight - margin) {
+          doc.addPage(); yPosition = margin; return true;
         }
         return false;
       };
-  
-      // Text adding function with better formatting
+
       const addText = (text, fontSize = 10, isBold = false, align = 'left') => {
         checkNewPage();
-        
         doc.setFontSize(fontSize);
         doc.setFont('helvetica', isBold ? 'bold' : 'normal');
-        
         const maxWidth = pageWidth - (margin * 2);
         const splitText = doc.splitTextToSize(text.toString(), maxWidth);
-        
         let xPosition = margin;
-        if (align === 'center') {
-          xPosition = pageWidth / 2;
-        } else if (align === 'right') {
-          xPosition = pageWidth - margin;
-        }
-        
-        doc.text(splitText, xPosition, yPosition, { align: align });
+        if (align === 'center') xPosition = pageWidth / 2;
+        else if (align === 'right') xPosition = pageWidth - margin;
+        doc.text(splitText, xPosition, yPosition, { align });
         yPosition += (splitText.length * (fontSize * 0.4)) + 3;
       };
-  
-      // Add header with better formatting
+
       addText(getReportTitle(reportType), 16, true, 'center');
       addText(`Generated on: ${new Date().toLocaleDateString('en-GB')}`, 10, false, 'center');
       yPosition += 10;
-  
-      // Generate content based on report type
+
       switch (reportType) {
-        case 'stock-gold':
-        case 'stock-silver':
-        case 'stock-full':
-          generateStockPDF(doc, data, reportType, addText, checkNewPage);
-          break;
+        case 'stock-gold': case 'stock-silver': case 'stock-full':
+          generateStockPDF(doc, data, reportType, addText, checkNewPage); break;
         case 'sales':
-          generateSalesPDF(doc, data, addText, checkNewPage);
-          break;
+          generateSalesPDF(doc, data, addText, checkNewPage); break;
         case 'customers':
-          generateCustomerPDF(doc, data, addText, checkNewPage);
-          break;
+          generateCustomerPDF(doc, data, addText, checkNewPage); break;
         default:
           addText('Data: ' + JSON.stringify(data, null, 2));
       }
-      
-      // Save the PDF
-      doc.save(filename);
-      
+
+      await saveDoc(doc, filename);
     } catch (error) {
       console.error('PDF generation error:', error);
-      
-      // More specific error handling
       if (error.message.includes('PDF library')) {
         alert('PDF library is not available. Please refresh the page and try again, or download as Excel instead.');
       } else {
         alert('PDF generation failed. Please try downloading as Excel format instead.');
-        
-        // Fallback: Don't generate text file, just show error
         throw error;
       }
     }
-};
-// Helper function to get report title
-const getReportTitle = (reportType) => {
-    switch (reportType) {
-      case 'stock-gold':
-        return 'GOLD INVENTORY REPORT';
-      case 'stock-silver':
-        return 'SILVER INVENTORY REPORT';
-      case 'stock-full':
-        return 'COMPLETE INVENTORY REPORT';
-      case 'sales':
-        return 'SALES REPORT';
-      case 'customers':
-        return 'CUSTOMER LIST REPORT';
-      default:
-        return 'REPORT';
-    }
-};  
-const generateStockPDF = (doc, data, reportType, addText, checkNewPage) => {
-  const formatDate = (dateString) => {
-    if (!dateString) return 'N/A';
-    const date = new Date(dateString);
-    const day = String(date.getDate()).padStart(2, '0');
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const year = date.getFullYear();
-    return `${day}/${month}/${year}`;
   };
-  
-    // Helper function to format purity to 2 decimal places without rounding
+
+  // ── Report title helper ───────────────────────────────────────────────
+  const getReportTitle = (reportType) => {
+    switch (reportType) {
+      case 'stock-gold':   return 'GOLD INVENTORY REPORT';
+      case 'stock-silver': return 'SILVER INVENTORY REPORT';
+      case 'stock-full':   return 'COMPLETE INVENTORY REPORT';
+      case 'sales':        return 'SALES REPORT';
+      case 'customers':    return 'CUSTOMER LIST REPORT';
+      default:             return 'REPORT';
+    }
+  };
+
+  // ── Generate stock PDF ────────────────────────────────────────────────
+  const generateStockPDF = (doc, data, reportType, addText, checkNewPage) => {
+    const formatDate = (dateString) => {
+      if (!dateString) return 'N/A';
+      const date = new Date(dateString);
+      return `${String(date.getDate()).padStart(2,'0')}/${String(date.getMonth()+1).padStart(2,'0')}/${date.getFullYear()}`;
+    };
+
     const formatPurity = (purity) => {
       if (!purity || purity === 0) return '0.00';
       const purityStr = purity.toString();
       const dotIndex = purityStr.indexOf('.');
-      
-      if (dotIndex === -1) {
-        return purityStr + '.00';
-      } else {
-        return purityStr.substring(0, dotIndex + 3).padEnd(dotIndex + 3, '0');
-      }
+      return dotIndex === -1 ? purityStr + '.00' : purityStr.substring(0, dotIndex + 3).padEnd(dotIndex + 3, '0');
     };
-  
-    // Helper function to add purity breakdown for a category
+
     const addPurityBreakdown = (purities, indent = '    ') => {
       if (!purities || Object.keys(purities).length === 0) {
-        addText(`${indent}No purity data available`, 9);
-        return;
+        addText(`${indent}No purity data available`, 9); return;
       }
-  
       addText(`${indent}Purity Breakdown:`, 10, true);
       Object.entries(purities).forEach(([purity, purityData]) => {
         if (purityData.totalItems > 0) {
@@ -669,20 +463,16 @@ const generateStockPDF = (doc, data, reportType, addText, checkNewPage) => {
         }
       });
     };
-  
+
     if (reportType === 'stock-full') {
-      // Full inventory report with categories only
-      if (data.totalGoldGross > 0 || (data.categories && Object.keys(data.categories).filter(key => key.includes('_gold')).length > 0)) {
+      if (data.totalGoldGross > 0 || (data.categories && Object.keys(data.categories).filter(k => k.includes('_gold')).length > 0)) {
         addText('GOLD INVENTORY SUMMARY', 14, true);
         addText(`Total Gross Weight: ${data.totalGoldGross || 0} g`, 11);
         addText(`Total Pure Weight: ${data.totalGoldPure || 0} g`, 11);
         addText(`Average Purity: ${data.goldAveragePurity || 0}%`, 11);
         addText('', 8);
-  
         addText('GOLD CATEGORY BREAKDOWN:', 12, true);
-        // Filter gold categories
         const goldCategories = Object.entries(data.categories || {}).filter(([key]) => key.includes('_gold'));
-        
         if (goldCategories.length > 0) {
           goldCategories.forEach(([category, categoryData]) => {
             addText(`• ${category}:`, 10, true);
@@ -690,39 +480,28 @@ const generateStockPDF = (doc, data, reportType, addText, checkNewPage) => {
             addText(`  - Pure Weight: ${categoryData.pureWeight || 0}g`, 10);
             addText(`  - Average Purity: ${formatPurity(categoryData.averagePurity)}%`, 10);
             addText(`  - Total Items: ${categoryData.totalItems || 0}`, 10);
-            
-            // Add purity breakdown
             addPurityBreakdown(categoryData.purities, '    ');
             addText('', 6);
           });
-  
-          // Gold Category Distribution (Pie Chart Data)
           addText('GOLD CATEGORY DISTRIBUTION (By Pure Weight):', 12, true);
           const totalPureWeight = data.totalGoldPure || 0;
           goldCategories.forEach(([category, categoryData]) => {
             if (categoryData.pureWeight > 0) {
-              const percentage = totalPureWeight > 0 ? 
-                Math.floor((categoryData.pureWeight / totalPureWeight) * 10000) / 100 : 0;
+              const percentage = totalPureWeight > 0 ? Math.floor((categoryData.pureWeight / totalPureWeight) * 10000) / 100 : 0;
               addText(`• ${category}: ${categoryData.pureWeight}g (${percentage}%)`, 10);
             }
           });
-        } else {
-          addText('No gold category data available', 10);
-        }
+        } else { addText('No gold category data available', 10); }
         addText('', 8);
       }
-      
-      if (data.totalSilverGross > 0 || (data.categories && Object.keys(data.categories).filter(key => key.includes('_silver')).length > 0)) {
+      if (data.totalSilverGross > 0 || (data.categories && Object.keys(data.categories).filter(k => k.includes('_silver')).length > 0)) {
         addText('SILVER INVENTORY SUMMARY', 14, true);
         addText(`Total Gross Weight: ${data.totalSilverGross || 0} g`, 11);
         addText(`Total Pure Weight: ${data.totalSilverPure || 0} g`, 11);
         addText(`Average Purity: ${data.silverAveragePurity || 0}%`, 11);
         addText('', 8);
-  
         addText('SILVER CATEGORY BREAKDOWN:', 12, true);
-        // Filter silver categories
         const silverCategories = Object.entries(data.categories || {}).filter(([key]) => key.includes('_silver'));
-        
         if (silverCategories.length > 0) {
           silverCategories.forEach(([category, categoryData]) => {
             addText(`• ${category}:`, 10, true);
@@ -730,40 +509,28 @@ const generateStockPDF = (doc, data, reportType, addText, checkNewPage) => {
             addText(`  - Pure Weight: ${categoryData.pureWeight || 0}g`, 10);
             addText(`  - Average Purity: ${formatPurity(categoryData.averagePurity)}%`, 10);
             addText(`  - Total Items: ${categoryData.totalItems || 0}`, 10);
-            
-            // Add purity breakdown
             addPurityBreakdown(categoryData.purities, '    ');
             addText('', 6);
           });
-  
-          // Silver Category Distribution (Pie Chart Data)
           addText('SILVER CATEGORY DISTRIBUTION (By Pure Weight):', 12, true);
           const totalPureWeight = data.totalSilverPure || 0;
           silverCategories.forEach(([category, categoryData]) => {
             if (categoryData.pureWeight > 0) {
-              const percentage = totalPureWeight > 0 ? 
-                Math.floor((categoryData.pureWeight / totalPureWeight) * 10000) / 100 : 0;
+              const percentage = totalPureWeight > 0 ? Math.floor((categoryData.pureWeight / totalPureWeight) * 10000) / 100 : 0;
               addText(`• ${category}: ${categoryData.pureWeight}g (${percentage}%)`, 10);
             }
           });
-        } else {
-          addText('No silver category data available', 10);
-        }
+        } else { addText('No silver category data available', 10); }
         addText('', 8);
       }
-      
     } else {
-      // Single metal inventory report
       const metalType = reportType === 'stock-gold' ? 'GOLD' : 'SILVER';
-      
-      // Categories breakdown
       if (data.categories && Object.keys(data.categories).length > 0) {
         addText(`${metalType} INVENTORY REPORT`, 14, true);
         addText(`Total Gross Weight: ${data.totalGross || 0} g`, 11);
         addText(`Total Pure Weight: ${data.totalPure || 0} g`, 11);
         addText(`Average Purity: ${data.averagePurity || 0}%`, 11);
         addText('', 8);
-        
         addText(`${metalType} CATEGORY BREAKDOWN:`, 12, true);
         Object.entries(data.categories).forEach(([category, categoryData]) => {
           addText(`• ${category}:`, 10, true);
@@ -771,1785 +538,809 @@ const generateStockPDF = (doc, data, reportType, addText, checkNewPage) => {
           addText(`  - Pure Weight: ${categoryData.pureWeight || 0}g`, 10);
           addText(`  - Average Purity: ${formatPurity(categoryData.averagePurity)}%`, 10);
           addText(`  - Total Items: ${categoryData.totalItems || 0}`, 10);
-          
-          // Add purity breakdown
           addPurityBreakdown(categoryData.purities, '    ');
           addText('', 6);
         });
-        
-        // Category distribution for single metal
         addText(`${metalType} CATEGORY DISTRIBUTION (By Pure Weight):`, 12, true);
         const totalPureWeight = data.totalPure || 0;
         Object.entries(data.categories).forEach(([category, categoryData]) => {
           if (categoryData.pureWeight > 0) {
-            const percentage = totalPureWeight > 0 ? 
-              Math.floor((categoryData.pureWeight / totalPureWeight) * 10000) / 100 : 0;
+            const percentage = totalPureWeight > 0 ? Math.floor((categoryData.pureWeight / totalPureWeight) * 10000) / 100 : 0;
             addText(`• ${category}: ${categoryData.pureWeight}g (${percentage}%)`, 10);
           }
         });
-      } else {
-        addText(`No ${metalType.toLowerCase()} data available`, 10);
+      } else { addText(`No ${metalType.toLowerCase()} data available`, 10); }
+    }
+  };
+
+  // ── Generate Excel from data ──────────────────────────────────────────
+  const generateExcelFromData = async (data, reportType, filename) => {
+    try {
+      if (reportType === 'stock-full') {
+        await generateMultiSheetExcel(data, filename); return;
       }
+      let csvContent = '';
+      switch (reportType) {
+        case 'stock-gold': case 'stock-silver':
+          csvContent = formatStockDataForCSV(data, reportType); break;
+        case 'sales':      csvContent = formatSalesDataForCSV(data); break;
+        case 'customers':  csvContent = formatCustomerDataForCSV(data); break;
+        default:           csvContent = 'Data\n' + JSON.stringify(data, null, 2);
+      }
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      await downloadFile(blob, filename.replace('.xlsx', '.csv'));
+    } catch (error) {
+      console.error('Excel generation error:', error);
+      const jsonBlob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      await downloadFile(jsonBlob, filename.replace('.xlsx', '.json'));
     }
-};
-const generateExcelFromData = (data, reportType, filename) => {
-  try {
-    // For full inventory report, ALWAYS generate Excel with multiple sheets
-    if (reportType === 'stock-full') {
-      console.log('Full inventory report requested - generating multi-sheet Excel');
-      generateMultiSheetExcel(data, filename);
-      return;
+  };
+
+  // ── Multi-sheet Excel ─────────────────────────────────────────────────
+  const generateMultiSheetExcel = async (data, filename) => {
+    try {
+      if (typeof XLSX === 'undefined') { generateFallbackCSV(data, filename); return; }
+
+      const formatDate = (dateString) => {
+        if (!dateString) return 'N/A';
+        const date = new Date(dateString);
+        return `${String(date.getDate()).padStart(2,'0')}/${String(date.getMonth()+1).padStart(2,'0')}/${date.getFullYear()}`;
+      };
+      const formatPurity = (purity) => {
+        if (!purity || purity === 0) return '0.00';
+        const s = purity.toString(); const dot = s.indexOf('.');
+        return dot === -1 ? s + '.00' : s.substring(0, dot + 3).padEnd(dot + 3, '0');
+      };
+
+      const wb = XLSX.utils.book_new();
+      const allCategories = data.categories || {};
+      const goldCategories = Object.entries(allCategories).filter(([key]) => key.toLowerCase().includes('gold') || key.includes('_gold'));
+      const silverCategories = Object.entries(allCategories).filter(([key]) => key.toLowerCase().includes('silver') || key.includes('_silver'));
+
+      const goldWs = XLSX.utils.aoa_to_sheet(generateGoldSheetData(data, goldCategories, formatDate, formatPurity));
+      XLSX.utils.book_append_sheet(wb, goldWs, 'Gold Inventory');
+
+      const silverWs = XLSX.utils.aoa_to_sheet(generateSilverSheetData(data, silverCategories, formatDate, formatPurity));
+      XLSX.utils.book_append_sheet(wb, silverWs, 'Silver Inventory');
+
+      const mixedCategories = Object.entries(allCategories).filter(([key]) =>
+        !key.toLowerCase().includes('gold') && !key.includes('_gold') &&
+        !key.toLowerCase().includes('silver') && !key.includes('_silver')
+      );
+      if (mixedCategories.length > 0) {
+        const mixedWs = XLSX.utils.aoa_to_sheet(generateMixedCategoriesSheetData(data, mixedCategories, formatDate, formatPurity));
+        XLSX.utils.book_append_sheet(wb, mixedWs, 'Other Categories');
+      }
+
+      await saveWorkbook(wb, filename);
+    } catch (error) {
+      console.error('Multi-sheet Excel error:', error);
+      await generateFallbackCSV(data, filename);
     }
-    
-    // For other reports, generate CSV
-    let csvContent = '';
-    
-    switch (reportType) {
-      case 'stock-gold':
-      case 'stock-silver':
-        csvContent = formatStockDataForCSV(data, reportType);
-        break;
-      case 'sales':
-        csvContent = formatSalesDataForCSV(data);
-        break;
-      case 'customers':
-        csvContent = formatCustomerDataForCSV(data);
-        break;
-      default:
-        csvContent = 'Data\n' + JSON.stringify(data, null, 2);
+  };
+
+  const generateGoldSheetData = (data, goldCategories, formatDate, formatPurity) => {
+    const sheetData = [];
+    sheetData.push(['GOLD INVENTORY REPORT']);
+    sheetData.push([`Generated on: ${formatDate(new Date().toISOString())}`]);
+    sheetData.push([]);
+    sheetData.push(['GOLD INVENTORY SUMMARY']);
+    sheetData.push(['Metric', 'Value']);
+    sheetData.push(['Total Gross Weight (g)', data.totalGoldGross || 0]);
+    sheetData.push(['Total Pure Weight (g)', data.totalGoldPure || 0]);
+    sheetData.push(['Average Purity (%)', data.goldAveragePurity || 0]);
+    sheetData.push([]);
+    if (goldCategories.length > 0) {
+      sheetData.push(['GOLD CATEGORY BREAKDOWN']);
+      sheetData.push(['Category', 'Gross Weight (g)', 'Pure Weight (g)', 'Average Purity (%)', 'Total Items']);
+      goldCategories.forEach(([category, categoryData]) => {
+        sheetData.push([category, categoryData.grossWeight || 0, categoryData.pureWeight || 0, formatPurity(categoryData.averagePurity || 0), categoryData.totalItems || 0]);
+      });
+      sheetData.push([]);
+      goldCategories.forEach(([category, categoryData]) => {
+        if (categoryData.purities && Object.keys(categoryData.purities).length > 0) {
+          sheetData.push([`${category} - Purity Breakdown`]);
+          sheetData.push(['Purity (%)', 'Gross Weight (g)', 'Pure Weight (g)', 'Items']);
+          Object.entries(categoryData.purities).forEach(([purity, purityData]) => {
+            if (purityData.totalItems > 0) sheetData.push([purity, purityData.grossWeight || 0, purityData.pureWeight || 0, purityData.totalItems || 0]);
+          });
+          sheetData.push([]);
+        }
+      });
+      const totalGoldPureWeight = data.totalGoldPure || 0;
+      if (totalGoldPureWeight > 0) {
+        sheetData.push(['GOLD CATEGORY DISTRIBUTION (By Pure Weight)']);
+        sheetData.push(['Category', 'Pure Weight (g)', 'Percentage (%)']);
+        goldCategories.forEach(([category, categoryData]) => {
+          if (categoryData.pureWeight > 0) {
+            const percentage = Math.round((categoryData.pureWeight / totalGoldPureWeight) * 10000) / 100;
+            sheetData.push([category, categoryData.pureWeight, percentage]);
+          }
+        });
+        sheetData.push([]);
+      }
+    } else {
+      sheetData.push(['GOLD CATEGORY BREAKDOWN']);
+      sheetData.push(['No gold category data available']);
+      sheetData.push([]);
     }
-    
-    // Create CSV file
+    return sheetData;
+  };
+
+  const generateSilverSheetData = (data, silverCategories, formatDate, formatPurity) => {
+    const sheetData = [];
+    sheetData.push(['SILVER INVENTORY REPORT']);
+    sheetData.push([`Generated on: ${formatDate(new Date().toISOString())}`]);
+    sheetData.push([]);
+    sheetData.push(['SILVER INVENTORY SUMMARY']);
+    sheetData.push(['Metric', 'Value']);
+    sheetData.push(['Total Gross Weight (g)', data.totalSilverGross || 0]);
+    sheetData.push(['Total Pure Weight (g)', data.totalSilverPure || 0]);
+    sheetData.push(['Average Purity (%)', data.silverAveragePurity || 0]);
+    sheetData.push([]);
+    if (silverCategories.length > 0) {
+      sheetData.push(['SILVER CATEGORY BREAKDOWN']);
+      sheetData.push(['Category', 'Gross Weight (g)', 'Pure Weight (g)', 'Average Purity (%)', 'Total Items']);
+      silverCategories.forEach(([category, categoryData]) => {
+        sheetData.push([category, categoryData.grossWeight || 0, categoryData.pureWeight || 0, formatPurity(categoryData.averagePurity || 0), categoryData.totalItems || 0]);
+      });
+      sheetData.push([]);
+      silverCategories.forEach(([category, categoryData]) => {
+        if (categoryData.purities && Object.keys(categoryData.purities).length > 0) {
+          sheetData.push([`${category} - Purity Breakdown`]);
+          sheetData.push(['Purity (%)', 'Gross Weight (g)', 'Pure Weight (g)', 'Items']);
+          Object.entries(categoryData.purities).forEach(([purity, purityData]) => {
+            if (purityData.totalItems > 0) sheetData.push([purity, purityData.grossWeight || 0, purityData.pureWeight || 0, purityData.totalItems || 0]);
+          });
+          sheetData.push([]);
+        }
+      });
+      const totalSilverPureWeight = data.totalSilverPure || 0;
+      if (totalSilverPureWeight > 0) {
+        sheetData.push(['SILVER CATEGORY DISTRIBUTION (By Pure Weight)']);
+        sheetData.push(['Category', 'Pure Weight (g)', 'Percentage (%)']);
+        silverCategories.forEach(([category, categoryData]) => {
+          if (categoryData.pureWeight > 0) {
+            const percentage = Math.round((categoryData.pureWeight / totalSilverPureWeight) * 10000) / 100;
+            sheetData.push([category, categoryData.pureWeight, percentage]);
+          }
+        });
+        sheetData.push([]);
+      }
+    } else {
+      sheetData.push(['SILVER CATEGORY BREAKDOWN']);
+      sheetData.push(['No silver category data available']);
+      sheetData.push([]);
+    }
+    return sheetData;
+  };
+
+  const generateMixedCategoriesSheetData = (data, mixedCategories, formatDate, formatPurity) => {
+    const sheetData = [];
+    sheetData.push(['OTHER CATEGORIES REPORT']);
+    sheetData.push([`Generated on: ${formatDate(new Date().toISOString())}`]);
+    sheetData.push([]);
+    if (mixedCategories.length > 0) {
+      sheetData.push(['OTHER CATEGORIES BREAKDOWN']);
+      sheetData.push(['Category', 'Gross Weight (g)', 'Pure Weight (g)', 'Average Purity (%)', 'Total Items']);
+      mixedCategories.forEach(([category, categoryData]) => {
+        sheetData.push([category, categoryData.grossWeight || 0, categoryData.pureWeight || 0, formatPurity(categoryData.averagePurity || 0), categoryData.totalItems || 0]);
+      });
+      sheetData.push([]);
+      mixedCategories.forEach(([category, categoryData]) => {
+        if (categoryData.purities && Object.keys(categoryData.purities).length > 0) {
+          sheetData.push([`${category} - Purity Breakdown`]);
+          sheetData.push(['Purity (%)', 'Gross Weight (g)', 'Pure Weight (g)', 'Items']);
+          Object.entries(categoryData.purities).forEach(([purity, purityData]) => {
+            if (purityData.totalItems > 0) sheetData.push([purity, purityData.grossWeight || 0, purityData.pureWeight || 0, purityData.totalItems || 0]);
+          });
+          sheetData.push([]);
+        }
+      });
+    } else {
+      sheetData.push(['No other category data available']);
+    }
+    return sheetData;
+  };
+
+  const generateFallbackCSV = async (data, filename) => {
+    const csvContent = formatStockDataForCSV(data, 'stock-full');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const downloadUrl = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = downloadUrl;
-    link.download = filename.replace('.xlsx', '.csv');
-    
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(downloadUrl);
-    
-  } catch (error) {
-    console.error('Excel generation error:', error);
-    // Fallback to JSON download
-    const jsonBlob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const downloadUrl = window.URL.createObjectURL(jsonBlob);
-    const link = document.createElement('a');
-    link.href = downloadUrl;
-    link.download = filename.replace('.xlsx', '.json');
-    
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(downloadUrl);
-  }
-};
-const generateMultiSheetExcel = (data, filename) => {
-  console.log('generateMultiSheetExcel called with data:', data);
-  
-  try {
-    // Check if XLSX library is available
-    if (typeof XLSX === 'undefined') {
-      console.error('XLSX library not found, falling back to CSV');
-      generateFallbackCSV(data, filename);
-      return;
-    }
+    await downloadFile(blob, filename.replace('.xlsx', '.csv'));
+  };
 
-    console.log('XLSX library is available, proceeding with Excel generation');
-
+  const formatStockDataForCSV = (data, reportType) => {
     const formatDate = (dateString) => {
       if (!dateString) return 'N/A';
-      const date = new Date(dateString);
-      const day = String(date.getDate()).padStart(2, '0');
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const year = date.getFullYear();
-      return `${day}/${month}/${year}`;
+      return new Date(dateString).toLocaleDateString('en-GB');
     };
-
     const formatPurity = (purity) => {
       if (!purity || purity === 0) return '0.00';
-      const purityStr = purity.toString();
-      const dotIndex = purityStr.indexOf('.');
-      
-      if (dotIndex === -1) {
-        return purityStr + '.00';
-      } else {
-        return purityStr.substring(0, dotIndex + 3).padEnd(dotIndex + 3, '0');
-      }
+      const s = purity.toString(); const dot = s.indexOf('.');
+      return dot === -1 ? s + '.00' : s.substring(0, dot + 3).padEnd(dot + 3, '0');
+    };
+    const addPurityBreakdownCSV = (purities, categoryName, metalType = '') => {
+      if (!purities || Object.keys(purities).length === 0) return `${metalType ? metalType + ' - ' : ''}${categoryName} - Purity Breakdown,No purity data available\n`;
+      let csv = `${metalType ? metalType + ' - ' : ''}${categoryName} - Purity Breakdown\n`;
+      csv += 'Purity (%),Gross Weight (g),Pure Weight (g),Items\n';
+      Object.entries(purities).forEach(([purity, purityData]) => {
+        if (purityData.totalItems > 0) csv += `${purity},${purityData.grossWeight || 0},${purityData.pureWeight || 0},${purityData.totalItems || 0}\n`;
+      });
+      csv += '\n';
+      return csv;
     };
 
-    // Create workbook
+    if (reportType === 'stock-full') {
+      let csv = 'COMPLETE INVENTORY REPORT\n';
+      csv += `Generated on: ${formatDate(new Date().toISOString())}\n\n`;
+      if (data.totalGoldGross > 0 || (data.categories && Object.keys(data.categories).filter(k => k.includes('_gold')).length > 0)) {
+        csv += 'GOLD INVENTORY SUMMARY\nMetric,Value\n';
+        csv += `Total Gross Weight (g),${data.totalGoldGross || 0}\nTotal Pure Weight (g),${data.totalGoldPure || 0}\nAverage Purity (%),${data.goldAveragePurity || 0}\n\n`;
+        csv += 'GOLD CATEGORY BREAKDOWN\nCategory,Gross Weight (g),Pure Weight (g),Average Purity (%),Total Items\n';
+        const goldCategories = Object.entries(data.categories || {}).filter(([key]) => key.includes('_gold'));
+        if (goldCategories.length > 0) {
+          goldCategories.forEach(([category, categoryData]) => {
+            csv += `${category},${categoryData.grossWeight || 0},${categoryData.pureWeight || 0},${formatPurity(categoryData.averagePurity)},${categoryData.totalItems || 0}\n`;
+          });
+          csv += '\n';
+          goldCategories.forEach(([category, categoryData]) => { csv += addPurityBreakdownCSV(categoryData.purities, category, 'Gold'); });
+          csv += 'GOLD CATEGORY DISTRIBUTION (By Pure Weight)\nCategory,Pure Weight (g),Percentage (%)\n';
+          const totalGoldPureWeight = data.totalGoldPure || 0;
+          goldCategories.forEach(([category, categoryData]) => {
+            if (categoryData.pureWeight > 0) {
+              const percentage = totalGoldPureWeight > 0 ? Math.floor((categoryData.pureWeight / totalGoldPureWeight) * 10000) / 100 : 0;
+              csv += `${category},${categoryData.pureWeight},${percentage}\n`;
+            }
+          });
+          csv += '\n';
+        } else { csv += 'No gold category data available\n\n'; }
+      }
+      if (data.totalSilverGross > 0 || (data.categories && Object.keys(data.categories).filter(k => k.includes('_silver')).length > 0)) {
+        csv += 'SILVER INVENTORY SUMMARY\nMetric,Value\n';
+        csv += `Total Gross Weight (g),${data.totalSilverGross || 0}\nTotal Pure Weight (g),${data.totalSilverPure || 0}\nAverage Purity (%),${data.silverAveragePurity || 0}\n\n`;
+        csv += 'SILVER CATEGORY BREAKDOWN\nCategory,Gross Weight (g),Pure Weight (g),Average Purity (%),Total Items\n';
+        const silverCategories = Object.entries(data.categories || {}).filter(([key]) => key.includes('_silver'));
+        if (silverCategories.length > 0) {
+          silverCategories.forEach(([category, categoryData]) => {
+            csv += `${category},${categoryData.grossWeight || 0},${categoryData.pureWeight || 0},${formatPurity(categoryData.averagePurity)},${categoryData.totalItems || 0}\n`;
+          });
+          csv += '\n';
+          silverCategories.forEach(([category, categoryData]) => { csv += addPurityBreakdownCSV(categoryData.purities, category, 'Silver'); });
+          csv += 'SILVER CATEGORY DISTRIBUTION (By Pure Weight)\nCategory,Pure Weight (g),Percentage (%)\n';
+          const totalSilverPureWeight = data.totalSilverPure || 0;
+          silverCategories.forEach(([category, categoryData]) => {
+            if (categoryData.pureWeight > 0) {
+              const percentage = totalSilverPureWeight > 0 ? Math.floor((categoryData.pureWeight / totalSilverPureWeight) * 10000) / 100 : 0;
+              csv += `${category},${categoryData.pureWeight},${percentage}\n`;
+            }
+          });
+          csv += '\n';
+        } else { csv += 'No silver category data available\n\n'; }
+      }
+      return csv;
+    } else {
+      const metalType = reportType === 'stock-gold' ? 'GOLD' : 'SILVER';
+      let csv = `${metalType} INVENTORY REPORT\nGenerated on: ${formatDate(new Date().toISOString())}\n\n`;
+      if (data.categories && Object.keys(data.categories).length > 0) {
+        csv += `${metalType} INVENTORY SUMMARY\nMetric,Value\n`;
+        csv += `Total Gross Weight (g),${data.totalGross || 0}\nTotal Pure Weight (g),${data.totalPure || 0}\nAverage Purity (%),${data.averagePurity || 0}\n\n`;
+        csv += `${metalType} CATEGORY BREAKDOWN\nCategory,Gross Weight (g),Pure Weight (g),Average Purity (%),Total Items\n`;
+        Object.entries(data.categories).forEach(([category, categoryData]) => {
+          csv += `${category},${categoryData.grossWeight || 0},${categoryData.pureWeight || 0},${formatPurity(categoryData.averagePurity)},${categoryData.totalItems || 0}\n`;
+        });
+        csv += '\n';
+        Object.entries(data.categories).forEach(([category, categoryData]) => { csv += addPurityBreakdownCSV(categoryData.purities, category); });
+        csv += `${metalType} CATEGORY DISTRIBUTION (By Pure Weight)\nCategory,Pure Weight (g),Percentage (%)\n`;
+        const totalPureWeight = data.totalPure || 0;
+        Object.entries(data.categories).forEach(([category, categoryData]) => {
+          if (categoryData.pureWeight > 0) {
+            const percentage = totalPureWeight > 0 ? Math.floor((categoryData.pureWeight / totalPureWeight) * 10000) / 100 : 0;
+            csv += `${category},${categoryData.pureWeight},${percentage}\n`;
+          }
+        });
+        csv += '\n';
+      } else { csv += `No ${metalType.toLowerCase()} data available\n\n`; }
+      return csv;
+    }
+  };
+
+  // ── Fetch sales data ──────────────────────────────────────────────────
+  const fetchSalesData = async (startDate = '', endDate = '') => {
+    setLoading(prev => ({ ...prev, sales: true }));
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) { setError('Authentication token not found. Please login again.'); return; }
+      const params = new URLSearchParams();
+      if (startDate) params.append('startDate', formatDateForAPI(startDate));
+      if (endDate) params.append('endDate', formatDateForAPI(endDate));
+      const response = await api.get(`/api/reports/sales?${params}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      setSalesData(response.data.salesReport);
+    } catch (error) {
+      setError('Failed to load sales data');
+      console.error('Sales data error:', error);
+    } finally {
+      setLoading(prev => ({ ...prev, sales: false }));
+    }
+  };
+
+  const getTodayFormatted = () => {
+    const today = new Date();
+    return formatDateForAPI(formatDateObjectForDisplay(today));
+  };
+
+  const [dateRange, setDateRange] = useState({ startDate: getTodayFormatted(), endDate: getTodayFormatted() });
+
+  useEffect(() => { fetchSalesData(dateRange.startDate, dateRange.endDate); }, []);
+  useEffect(() => {
+    if (dateRange.startDate && dateRange.endDate) fetchSalesData(dateRange.startDate, dateRange.endDate);
+    else fetchSalesData();
+  }, [dateRange]);
+
+  const handleDateRangeChange = (type, value) => setDateRange(prev => ({ ...prev, [type]: value }));
+
+  const handleQuickDateSelect = (period) => {
+    const now = new Date();
+    let startDate, endDate;
+    switch (period) {
+      case 'today':
+        startDate = endDate = formatDateForAPI(formatDateObjectForDisplay(now)); break;
+      case 'week':
+        const weekStart = new Date(); weekStart.setDate(now.getDate() - 7);
+        startDate = formatDateForAPI(formatDateObjectForDisplay(weekStart));
+        endDate = formatDateForAPI(formatDateObjectForDisplay(now)); break;
+      case 'month':
+        const monthStart = new Date(); monthStart.setMonth(now.getMonth() - 1);
+        startDate = formatDateForAPI(formatDateObjectForDisplay(monthStart));
+        endDate = formatDateForAPI(formatDateObjectForDisplay(now)); break;
+      case '6months':
+        const sixMonthsStart = new Date(); sixMonthsStart.setMonth(now.getMonth() - 6);
+        startDate = formatDateForAPI(formatDateObjectForDisplay(sixMonthsStart));
+        endDate = formatDateForAPI(formatDateObjectForDisplay(now)); break;
+      case 'year':
+        const yearStart = new Date(); yearStart.setFullYear(now.getFullYear() - 1);
+        startDate = formatDateForAPI(formatDateObjectForDisplay(yearStart));
+        endDate = formatDateForAPI(formatDateObjectForDisplay(now)); break;
+      case 'alltime':
+        setDateRange({ startDate: '', endDate: '' }); return;
+      default: return;
+    }
+    setDateRange({ startDate, endDate });
+  };
+
+  // ── Sales PDF ─────────────────────────────────────────────────────────
+  const generateSalesPDFReport = async (data, filename) => {
+    try {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+      let yPosition = 20;
+      const pageHeight = doc.internal.pageSize.height;
+      const margin = 20;
+
+      const addText = (text, fontSize = 10, isBold = false, leftMargin = 0) => {
+        if (yPosition > pageHeight - 30) { doc.addPage(); yPosition = 20; }
+        doc.setFont('helvetica', isBold ? 'bold' : 'normal');
+        doc.setFontSize(fontSize);
+        doc.text(text, margin + leftMargin, yPosition);
+        yPosition += fontSize + 2;
+      };
+      const addSpace = (space = 5) => { yPosition += space; };
+
+      generateCleanSalesPDF(doc, data, { addText, addSpace });
+      await saveDoc(doc, filename);
+    } catch (error) {
+      console.error('PDF generation error:', error);
+      throw new Error('Failed to generate PDF report');
+    }
+  };
+
+  const generateCleanSalesPDF = (doc, data, { addText, addSpace }) => {
+    addText('SALES REPORT', 16, true);
+    addSpace(5);
+    if (data.dateRange) {
+      const startDate = data.dateRange.startDate ? formatAPIDateForDisplay(data.dateRange.startDate) : 'Start';
+      const endDate = data.dateRange.endDate ? formatAPIDateForDisplay(data.dateRange.endDate) : 'End';
+      addText(`Report Period: ${startDate} to ${endDate}`, 10);
+      addText(`Generated on: ${formatDateObjectForDisplay(new Date())}`, 10);
+    }
+    addSpace(10);
+    if (data.summary) {
+      addText('EXECUTIVE SUMMARY', 12, true);
+      addSpace(3);
+      addText(`Total Revenue: Rs ${(data.summary.totalRevenue || 0).toLocaleString()}`, 10);
+      addText(`Total Items Sold: ${data.summary.totalItems || 0} items`, 10);
+      const avgSale = data.summary.totalItems ? Math.round(data.summary.totalRevenue / data.summary.totalItems) : 0;
+      addText(`Average Sale Value: Rs ${avgSale.toLocaleString()}`, 10);
+    }
+    addSpace(15);
+    if (data.byMetal) {
+      addText('METAL-WISE PERFORMANCE', 12, true);
+      addSpace(5);
+      if (data.byMetal.gold && data.byMetal.gold.totalRevenue > 0) {
+        let goldItemsSold = 0;
+        if (data.topPerformers) goldItemsSold = data.topPerformers.filter(i => i.metalType === 'gold').reduce((s, i) => s + (i.totalItems || 0), 0);
+        if (goldItemsSold === 0 && data.summary) goldItemsSold = Math.round(data.summary.totalItems * (data.byMetal.gold.totalRevenue / (data.summary.totalRevenue || 1)));
+        addText('Gold Sales:', 11, true);
+        addText(`Revenue: Rs ${(data.byMetal.gold.totalRevenue || 0).toLocaleString()}`, 10);
+        addText(`Gross Weight: ${data.byMetal.gold.totalWeight || 0} grams`, 10);
+        addText(`Pure Weight: ${data.byMetal.gold.totalPureWeight || 0} grams`, 10);
+        addText(`Total Items Sold: ${goldItemsSold} items`, 10);
+        addSpace(8);
+      }
+      if (data.byMetal.silver && data.byMetal.silver.totalRevenue > 0) {
+        let silverItemsSold = 0;
+        if (data.topPerformers) silverItemsSold = data.topPerformers.filter(i => i.metalType === 'silver').reduce((s, i) => s + (i.totalItems || 0), 0);
+        if (silverItemsSold === 0 && data.summary) silverItemsSold = Math.round(data.summary.totalItems * (data.byMetal.silver.totalRevenue / (data.summary.totalRevenue || 1)));
+        addText('Silver Sales:', 11, true);
+        addText(`Revenue: Rs ${(data.byMetal.silver.totalRevenue || 0).toLocaleString()}`, 10);
+        addText(`Gross Weight: ${data.byMetal.silver.totalWeight || 0} grams`, 10);
+        addText(`Pure Weight: ${data.byMetal.silver.totalPureWeight || 0} grams`, 10);
+        addText(`Total Items Sold: ${silverItemsSold} items`, 10);
+        addSpace(8);
+      }
+    }
+    addSpace(10);
+    if (data.topPerformers && data.topPerformers.length > 0) {
+      addText('TOP REVENUE GENERATORS', 12, true);
+      addSpace(5);
+      [...data.topPerformers].sort((a, b) => (b.totalSalesAmount || 0) - (a.totalSalesAmount || 0)).slice(0, 10).forEach((item, index) => {
+        addText(`${index + 1}. ${item.metalType || 'N/A'} ${item.category || 'N/A'} (${item.purity || 0}% purity)`, 10, true);
+        addText(`   Revenue: Rs ${(item.totalSalesAmount || 0).toLocaleString()}`, 10);
+        addText(`   Weight: ${item.totalGrossWeight || 0}g gross, ${item.totalPureWeight || 0}g pure`, 10);
+        addText(`   Items Sold: ${item.totalItems || 0} items`, 10);
+        addSpace(3);
+      });
+    }
+    addSpace(15);
+    if (data.topPerformers && data.topPerformers.length > 0) {
+      addText('TOP SOLD QUANTITY ITEMS', 12, true);
+      addSpace(5);
+      [...data.topPerformers].sort((a, b) => (b.totalItems || 0) - (a.totalItems || 0)).slice(0, 10).forEach((item, index) => {
+        addText(`${index + 1}. ${item.metalType || 'N/A'} ${item.category || 'N/A'} (${item.purity || 0}% purity)`, 10, true);
+        addText(`   Items Sold: ${item.totalItems || 0} items`, 10);
+        addText(`   Revenue: Rs ${(item.totalSalesAmount || 0).toLocaleString()}`, 10);
+        addText(`   Weight: ${item.totalGrossWeight || 0}g gross, ${item.totalPureWeight || 0}g pure`, 10);
+        addSpace(3);
+      });
+    }
+    addSpace(15);
+    if (data.entries && data.entries.length > 0) {
+      addText('RECENT SALES TRANSACTIONS', 12, true);
+      addSpace(5);
+      data.entries.slice(0, 20).forEach((entry, index) => {
+        const date = formatAPIDateForDisplay(entry.soldAt);
+        const quantity = entry.isBulk ? `${entry.itemCount || 1} items (Bulk Sale)` : '1 item';
+        addText(`${index + 1}. ${date} - ${entry.metalType || 'N/A'} ${entry.category || 'N/A'}`, 10, true);
+        addText(`   Purity: ${entry.purity || 0}%, Weight: ${entry.weight || 0}g`, 10);
+        addText(`   Price: Rs ${(entry.salesPrice || 0).toLocaleString()}`, 10);
+        addText(`   Quantity: ${quantity}`, 10);
+        const customerInfo = [];
+        if (entry.customerName) customerInfo.push(`Name: ${entry.customerName}`);
+        if (entry.customerMobile) customerInfo.push(`Mobile: ${entry.customerMobile}`);
+        if (entry.customerAddress) customerInfo.push(`Address: ${entry.customerAddress}`);
+        addText(`   Customer: ${customerInfo.length > 0 ? customerInfo.join(', ') : 'Not provided'}`, 10);
+        addSpace(3);
+      });
+      if (data.entries.length > 20) { addSpace(5); addText(`Note: Showing recent 20 transactions out of ${data.entries.length} total`, 9); }
+    } else {
+      addText('SALES TRANSACTIONS', 12, true);
+      addSpace(5);
+      addText('Individual transaction details are not included in this report.', 10);
+      addText('To view transaction details, enable "Include Entries" option when generating the report.', 10);
+    }
+    addSpace(15);
+    addText('This report is system generated and contains confidential business information.', 8);
+    addText(`Report ID: RPT-${Date.now()}`, 8);
+  };
+
+  // ── Sales Excel ───────────────────────────────────────────────────────
+  const generateSalesExcel = (data) => {
     const wb = XLSX.utils.book_new();
-    console.log('Created new workbook');
-
-    // Filter categories for gold and silver
-    const allCategories = data.categories || {};
-    const goldCategories = Object.entries(allCategories).filter(([key]) => 
-      key.toLowerCase().includes('gold') || key.includes('_gold')
-    );
-    const silverCategories = Object.entries(allCategories).filter(([key]) => 
-      key.toLowerCase().includes('silver') || key.includes('_silver')
-    );
-
-    console.log('All categories:', Object.keys(allCategories));
-    console.log('Gold categories found:', goldCategories.map(([key]) => key));
-    console.log('Silver categories found:', silverCategories.map(([key]) => key));
-
-    // FORCE CREATE GOLD SHEET - No conditions, always create
-    console.log('Creating Gold sheet...');
-    const goldData = generateGoldSheetData(data, goldCategories, formatDate, formatPurity);
-    const goldWs = XLSX.utils.aoa_to_sheet(goldData);
-    XLSX.utils.book_append_sheet(wb, goldWs, 'Gold Inventory');
-    console.log('Gold sheet created and added to workbook');
-
-    // FORCE CREATE SILVER SHEET - No conditions, always create
-    console.log('Creating Silver sheet...');
-    const silverData = generateSilverSheetData(data, silverCategories, formatDate, formatPurity);
-    const silverWs = XLSX.utils.aoa_to_sheet(silverData);
-    XLSX.utils.book_append_sheet(wb, silverWs, 'Silver Inventory');
-    console.log('Silver sheet created and added to workbook');
-
-    // Check for mixed categories (neither gold nor silver)
-    const mixedCategories = Object.entries(allCategories).filter(([key]) => 
-      !key.toLowerCase().includes('gold') && !key.includes('_gold') &&
-      !key.toLowerCase().includes('silver') && !key.includes('_silver')
-    );
-
-    if (mixedCategories.length > 0) {
-      console.log('Creating Mixed Categories sheet for:', mixedCategories.map(([key]) => key));
-      const mixedData = generateMixedCategoriesSheetData(data, mixedCategories, formatDate, formatPurity);
-      const mixedWs = XLSX.utils.aoa_to_sheet(mixedData);
-      XLSX.utils.book_append_sheet(wb, mixedWs, 'Other Categories');
-      console.log('Mixed categories sheet created and added to workbook');
+    const summaryData = [
+      ['SALES REPORT'], [''],
+      ['EXECUTIVE SUMMARY'],
+      ['Report Period', `${data.dateRange?.startDate ? formatAPIDateForDisplay(data.dateRange.startDate) : 'Start'} to ${data.dateRange?.endDate ? formatAPIDateForDisplay(data.dateRange.endDate) : 'End'}`],
+      ['Generated on', formatDateObjectForDisplay(new Date())], [''],
+      ['Total Revenue', `Rs ${(data.summary?.totalRevenue || 0).toLocaleString()}`],
+      ['Total Items Sold', `${data.summary?.totalItems || 0} items`],
+      ['Average Sale Value', `Rs ${data.summary?.totalItems ? Math.round(data.summary.totalRevenue / data.summary.totalItems).toLocaleString() : 0}`],
+      [''], ['METAL-WISE PERFORMANCE'], ['']
+    ];
+    if (data.byMetal?.gold && data.byMetal.gold.totalRevenue > 0) {
+      let goldItemsSold = data.topPerformers ? data.topPerformers.filter(i => i.metalType === 'gold').reduce((s, i) => s + (i.totalItems || 0), 0) : 0;
+      summaryData.push(['Gold Sales', ''], ['Revenue', `Rs ${(data.byMetal.gold.totalRevenue || 0).toLocaleString()}`], ['Gross Weight', `${data.byMetal.gold.totalWeight || 0} grams`], ['Pure Weight', `${data.byMetal.gold.totalPureWeight || 0} grams`], ['Total Items Sold', `${goldItemsSold} items`], ['']);
     }
-
-    // Verify sheets were created
-    console.log('Final workbook contains sheets:', wb.SheetNames);
-    console.log('Number of sheets:', wb.SheetNames.length);
-
-    if (wb.SheetNames.length === 0) {
-      console.error('ERROR: No sheets were created! This should not happen.');
-      throw new Error('No sheets were created in the workbook');
+    if (data.byMetal?.silver && data.byMetal.silver.totalRevenue > 0) {
+      let silverItemsSold = data.topPerformers ? data.topPerformers.filter(i => i.metalType === 'silver').reduce((s, i) => s + (i.totalItems || 0), 0) : 0;
+      summaryData.push(['Silver Sales', ''], ['Revenue', `Rs ${(data.byMetal.silver.totalRevenue || 0).toLocaleString()}`], ['Gross Weight', `${data.byMetal.silver.totalWeight || 0} grams`], ['Pure Weight', `${data.byMetal.silver.totalPureWeight || 0} grams`], ['Total Items Sold', `${silverItemsSold} items`], ['']);
     }
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryData), 'Summary');
 
-    // Save the file
-    console.log('Saving Excel file:', filename);
-    XLSX.writeFile(wb, filename);
-    console.log('Excel file saved successfully');
-
-  } catch (error) {
-    console.error('Multi-sheet Excel generation error:', error);
-    console.error('Error stack:', error.stack);
-    console.log('Falling back to CSV generation');
-    generateFallbackCSV(data, filename);
-  }
-};
-const generateGoldSheetData = (data, goldCategories, formatDate, formatPurity) => {
-  console.log('Generating Gold sheet data with categories:', goldCategories.length);
-  
-  const sheetData = [];
-  
-  // Header
-  sheetData.push(['GOLD INVENTORY REPORT']);
-  sheetData.push([`Generated on: ${formatDate(new Date().toISOString())}`]);
-  sheetData.push([]);
-  
-  // Summary Section - Always include, even if zero
-  sheetData.push(['GOLD INVENTORY SUMMARY']);
-  sheetData.push(['Metric', 'Value']);
-  sheetData.push(['Total Gross Weight (g)', data.totalGoldGross || 0]);
-  sheetData.push(['Total Pure Weight (g)', data.totalGoldPure || 0]);
-  sheetData.push(['Average Purity (%)', data.goldAveragePurity || 0]);
-  sheetData.push([]);
-  
-  // Category Breakdown
-  if (goldCategories.length > 0) {
-    sheetData.push(['GOLD CATEGORY BREAKDOWN']);
-    sheetData.push(['Category', 'Gross Weight (g)', 'Pure Weight (g)', 'Average Purity (%)', 'Total Items']);
-    
-    goldCategories.forEach(([category, categoryData]) => {
-      sheetData.push([
-        category,
-        categoryData.grossWeight || 0,
-        categoryData.pureWeight || 0,
-        formatPurity(categoryData.averagePurity || 0),
-        categoryData.totalItems || 0
-      ]);
-    });
-    sheetData.push([]);
-    
-    // Purity Breakdowns
-    goldCategories.forEach(([category, categoryData]) => {
-      if (categoryData.purities && Object.keys(categoryData.purities).length > 0) {
-        sheetData.push([`${category} - Purity Breakdown`]);
-        sheetData.push(['Purity (%)', 'Gross Weight (g)', 'Pure Weight (g)', 'Items']);
-        
-        Object.entries(categoryData.purities).forEach(([purity, purityData]) => {
-          if (purityData.totalItems > 0) {
-            sheetData.push([
-              purity,
-              purityData.grossWeight || 0,
-              purityData.pureWeight || 0,
-              purityData.totalItems || 0
-            ]);
-          }
-        });
-        sheetData.push([]);
-      }
-    });
-    
-    // Category Distribution
-    const totalGoldPureWeight = data.totalGoldPure || 0;
-    if (totalGoldPureWeight > 0) {
-      sheetData.push(['GOLD CATEGORY DISTRIBUTION (By Pure Weight)']);
-      sheetData.push(['Category', 'Pure Weight (g)', 'Percentage (%)']);
-      
-      goldCategories.forEach(([category, categoryData]) => {
-        if (categoryData.pureWeight > 0) {
-          const percentage = Math.round((categoryData.pureWeight / totalGoldPureWeight) * 10000) / 100;
-          sheetData.push([category, categoryData.pureWeight, percentage]);
-        }
+    if (data.topPerformers && data.topPerformers.length > 0) {
+      const topRevenueData = [['TOP REVENUE GENERATORS'], [''], ['Rank', 'Metal Type', 'Category', 'Purity (%)', 'Revenue', 'Gross Weight (g)', 'Pure Weight (g)', 'Items Sold']];
+      [...data.topPerformers].sort((a, b) => (b.totalSalesAmount || 0) - (a.totalSalesAmount || 0)).slice(0, 10).forEach((item, i) => {
+        topRevenueData.push([i + 1, item.metalType || 'N/A', item.category || 'N/A', item.purity || 0, `Rs ${(item.totalSalesAmount || 0).toLocaleString()}`, item.totalGrossWeight || 0, item.totalPureWeight || 0, item.totalItems || 0]);
       });
-      sheetData.push([]);
-    }
-  } else {
-    sheetData.push(['GOLD CATEGORY BREAKDOWN']);
-    sheetData.push(['No gold category data available']);
-    sheetData.push(['However, summary totals above may still contain gold data']);
-    sheetData.push([]);
-  }
-  
-  console.log('Gold sheet data rows:', sheetData.length);
-  return sheetData;
-};
-const generateSilverSheetData = (data, silverCategories, formatDate, formatPurity) => {
-  console.log('Generating Silver sheet data with categories:', silverCategories.length);
-  
-  const sheetData = [];
-  
-  // Header
-  sheetData.push(['SILVER INVENTORY REPORT']);
-  sheetData.push([`Generated on: ${formatDate(new Date().toISOString())}`]);
-  sheetData.push([]);
-  
-  // Summary Section - Always include, even if zero
-  sheetData.push(['SILVER INVENTORY SUMMARY']);
-  sheetData.push(['Metric', 'Value']);
-  sheetData.push(['Total Gross Weight (g)', data.totalSilverGross || 0]);
-  sheetData.push(['Total Pure Weight (g)', data.totalSilverPure || 0]);
-  sheetData.push(['Average Purity (%)', data.silverAveragePurity || 0]);
-  sheetData.push([]);
-  
-  // Category Breakdown
-  if (silverCategories.length > 0) {
-    sheetData.push(['SILVER CATEGORY BREAKDOWN']);
-    sheetData.push(['Category', 'Gross Weight (g)', 'Pure Weight (g)', 'Average Purity (%)', 'Total Items']);
-    
-    silverCategories.forEach(([category, categoryData]) => {
-      sheetData.push([
-        category,
-        categoryData.grossWeight || 0,
-        categoryData.pureWeight || 0,
-        formatPurity(categoryData.averagePurity || 0),
-        categoryData.totalItems || 0
-      ]);
-    });
-    sheetData.push([]);
-    
-    // Purity Breakdowns
-    silverCategories.forEach(([category, categoryData]) => {
-      if (categoryData.purities && Object.keys(categoryData.purities).length > 0) {
-        sheetData.push([`${category} - Purity Breakdown`]);
-        sheetData.push(['Purity (%)', 'Gross Weight (g)', 'Pure Weight (g)', 'Items']);
-        
-        Object.entries(categoryData.purities).forEach(([purity, purityData]) => {
-          if (purityData.totalItems > 0) {
-            sheetData.push([
-              purity,
-              purityData.grossWeight || 0,
-              purityData.pureWeight || 0,
-              purityData.totalItems || 0
-            ]);
-          }
-        });
-        sheetData.push([]);
-      }
-    });
-    
-    // Category Distribution
-    const totalSilverPureWeight = data.totalSilverPure || 0;
-    if (totalSilverPureWeight > 0) {
-      sheetData.push(['SILVER CATEGORY DISTRIBUTION (By Pure Weight)']);
-      sheetData.push(['Category', 'Pure Weight (g)', 'Percentage (%)']);
-      
-      silverCategories.forEach(([category, categoryData]) => {
-        if (categoryData.pureWeight > 0) {
-          const percentage = Math.round((categoryData.pureWeight / totalSilverPureWeight) * 10000) / 100;
-          sheetData.push([category, categoryData.pureWeight, percentage]);
-        }
-      });
-      sheetData.push([]);
-    }
-  } else {
-    sheetData.push(['SILVER CATEGORY BREAKDOWN']);
-    sheetData.push(['No silver category data available']);
-    sheetData.push(['However, summary totals above may still contain silver data']);
-    sheetData.push([]);
-  }
-  
-  console.log('Silver sheet data rows:', sheetData.length);
-  return sheetData;
-};
-const generateMixedCategoriesSheetData = (data, mixedCategories, formatDate, formatPurity) => {
-  console.log('Generating Mixed Categories sheet data with categories:', mixedCategories.length);
-  
-  const sheetData = [];
-  
-  // Header
-  sheetData.push(['OTHER CATEGORIES REPORT']);
-  sheetData.push([`Generated on: ${formatDate(new Date().toISOString())}`]);
-  sheetData.push([]);
-  
-  if (mixedCategories.length > 0) {
-    sheetData.push(['OTHER CATEGORIES BREAKDOWN']);
-    sheetData.push(['Category', 'Gross Weight (g)', 'Pure Weight (g)', 'Average Purity (%)', 'Total Items']);
-    
-    mixedCategories.forEach(([category, categoryData]) => {
-      sheetData.push([
-        category,
-        categoryData.grossWeight || 0,
-        categoryData.pureWeight || 0,
-        formatPurity(categoryData.averagePurity || 0),
-        categoryData.totalItems || 0
-      ]);
-    });
-    sheetData.push([]);
-    
-    // Purity Breakdowns
-    mixedCategories.forEach(([category, categoryData]) => {
-      if (categoryData.purities && Object.keys(categoryData.purities).length > 0) {
-        sheetData.push([`${category} - Purity Breakdown`]);
-        sheetData.push(['Purity (%)', 'Gross Weight (g)', 'Pure Weight (g)', 'Items']);
-        
-        Object.entries(categoryData.purities).forEach(([purity, purityData]) => {
-          if (purityData.totalItems > 0) {
-            sheetData.push([
-              purity,
-              purityData.grossWeight || 0,
-              purityData.pureWeight || 0,
-              purityData.totalItems || 0
-            ]);
-          }
-        });
-        sheetData.push([]);
-      }
-    });
-  } else {
-    sheetData.push(['No other category data available']);
-  }
-  
-  console.log('Mixed categories sheet data rows:', sheetData.length);
-  return sheetData;
-};
-const generateFallbackCSV = (data, filename) => {
-  console.log('Generating fallback CSV');
-  // Fallback to original CSV format if XLSX library is not available
-  const csvContent = formatStockDataForCSV(data, 'stock-full');
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const downloadUrl = window.URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = downloadUrl;
-  link.download = filename.replace('.xlsx', '.csv');
-  
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  window.URL.revokeObjectURL(downloadUrl);
-};
-// Format data as text (fallback)
-const formatDataAsText = (data, reportType) => {
-  let content = `${getReportTitle(reportType)}\n`;
-  content += `Generated on: ${new Date().toLocaleDateString('en-GB')}\n\n`;
-  content += JSON.stringify(data, null, 2);
-  return content;
-};
-const formatStockDataForCSV = (data, reportType) => {
-  const formatDate = (dateString) => {
-    if (!dateString) return 'N/A';
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-GB'); // dd/mm/yyyy format
-  };
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(topRevenueData), 'Top Revenue Generators');
 
-  // Helper function to format purity to 2 decimal places without rounding
-  const formatPurity = (purity) => {
-    if (!purity || purity === 0) return '0.00';
-    const purityStr = purity.toString();
-    const dotIndex = purityStr.indexOf('.');
-    
-    if (dotIndex === -1) {
-      return purityStr + '.00';
+      const topQuantityData = [['TOP SOLD QUANTITY ITEMS'], [''], ['Rank', 'Metal Type', 'Category', 'Purity (%)', 'Items Sold', 'Revenue', 'Gross Weight (g)', 'Pure Weight (g)']];
+      [...data.topPerformers].sort((a, b) => (b.totalItems || 0) - (a.totalItems || 0)).slice(0, 10).forEach((item, i) => {
+        topQuantityData.push([i + 1, item.metalType || 'N/A', item.category || 'N/A', item.purity || 0, item.totalItems || 0, `Rs ${(item.totalSalesAmount || 0).toLocaleString()}`, item.totalGrossWeight || 0, item.totalPureWeight || 0]);
+      });
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(topQuantityData), 'Top Sold Quantity');
+
+      const goldItems = data.topPerformers.filter(i => i.metalType === 'gold');
+      if (goldItems.length > 0) {
+        const goldData = [['GOLD WEIGHT LEADERS'], [''], ['Rank', 'Category', 'Purity (%)', 'Gross Weight (g)', 'Pure Weight (g)', 'Items Sold', 'Revenue']];
+        [...goldItems].sort((a, b) => (b.totalGrossWeight || 0) - (a.totalGrossWeight || 0)).slice(0, 10).forEach((item, i) => {
+          goldData.push([i + 1, item.category || 'N/A', item.purity || 0, item.totalGrossWeight || 0, item.totalPureWeight || 0, item.totalItems || 0, `Rs ${(item.totalSalesAmount || 0).toLocaleString()}`]);
+        });
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(goldData), 'Gold Weight Leaders');
+      }
+
+      const silverItems = data.topPerformers.filter(i => i.metalType === 'silver');
+      if (silverItems.length > 0) {
+        const silverData = [['SILVER WEIGHT LEADERS'], [''], ['Rank', 'Category', 'Purity (%)', 'Gross Weight (g)', 'Pure Weight (g)', 'Items Sold', 'Revenue']];
+        [...silverItems].sort((a, b) => (b.totalGrossWeight || 0) - (a.totalGrossWeight || 0)).slice(0, 10).forEach((item, i) => {
+          silverData.push([i + 1, item.category || 'N/A', item.purity || 0, item.totalGrossWeight || 0, item.totalPureWeight || 0, item.totalItems || 0, `Rs ${(item.totalSalesAmount || 0).toLocaleString()}`]);
+        });
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(silverData), 'Silver Weight Leaders');
+      }
+    }
+
+    if (data.entries && data.entries.length > 0) {
+      const transactionData = [['RECENT SALES TRANSACTIONS'], [''], ['#', 'Date', 'Metal Type', 'Category', 'Purity (%)', 'Weight (g)', 'Price', 'Quantity', 'Customer Name', 'Customer Mobile', 'Customer Address']];
+      data.entries.slice(0, 20).forEach((entry, i) => {
+        transactionData.push([i + 1, formatAPIDateForDisplay(entry.soldAt), entry.metalType || 'N/A', entry.category || 'N/A', entry.purity || 0, entry.weight || 0, `Rs ${(entry.salesPrice || 0).toLocaleString()}`, entry.isBulk ? `${entry.itemCount || 1} items (Bulk Sale)` : '1 item', entry.customerName || 'Not provided', entry.customerMobile || 'Not provided', entry.customerAddress || 'Not provided']);
+      });
+      if (data.entries.length > 20) transactionData.push(['', '', '', '', '', '', '', '', '', '', `Note: Showing 20 of ${data.entries.length} total`]);
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(transactionData), 'Recent Transactions');
     } else {
-      return purityStr.substring(0, dotIndex + 3).padEnd(dotIndex + 3, '0');
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['SALES TRANSACTIONS'], [''], ['Individual transaction details are not included in this report.']]), 'Transactions Note');
     }
+    return wb;
   };
 
-  // Helper function to add purity breakdown section
-  const addPurityBreakdownCSV = (purities, categoryName, metalType = '') => {
-    if (!purities || Object.keys(purities).length === 0) {
-      return `${metalType ? metalType + ' - ' : ''}${categoryName} - Purity Breakdown,No purity data available\n`;
+  const formatSalesDataForCSV = (data) => {
+    let csv = '\uFEFF';
+    csv += 'SALES REPORT\n\nEXECUTIVE SUMMARY\n';
+    csv += `Report Period,${data.dateRange?.startDate ? formatAPIDateForDisplay(data.dateRange.startDate) : 'Start'} to ${data.dateRange?.endDate ? formatAPIDateForDisplay(data.dateRange.endDate) : 'End'}\n`;
+    csv += `Generated on,${formatDateObjectForDisplay(new Date())}\n\n`;
+    csv += `Total Revenue,Rs ${(data.summary?.totalRevenue || 0).toLocaleString()}\nTotal Items Sold,${data.summary?.totalItems || 0} items\nAverage Sale Value,Rs ${data.summary?.totalItems ? Math.round(data.summary.totalRevenue / data.summary.totalItems).toLocaleString() : 0}\n\n`;
+    csv += 'METAL-WISE PERFORMANCE\n\n';
+    if (data.byMetal?.gold && data.byMetal.gold.totalRevenue > 0) {
+      let goldItemsSold = data.topPerformers ? data.topPerformers.filter(i => i.metalType === 'gold').reduce((s, i) => s + (i.totalItems || 0), 0) : 0;
+      csv += `Gold Sales\nRevenue,Rs ${(data.byMetal.gold.totalRevenue || 0).toLocaleString()}\nGross Weight,${data.byMetal.gold.totalWeight || 0} grams\nPure Weight,${data.byMetal.gold.totalPureWeight || 0} grams\nTotal Items Sold,${goldItemsSold} items\n\n`;
     }
-
-    let csv = '';
-    csv += `${metalType ? metalType + ' - ' : ''}${categoryName} - Purity Breakdown\n`;
-    csv += 'Purity (%),Gross Weight (g),Pure Weight (g),Items\n';
-    
-    Object.entries(purities).forEach(([purity, purityData]) => {
-      if (purityData.totalItems > 0) {
-        csv += `${purity},${purityData.grossWeight || 0},${purityData.pureWeight || 0},${purityData.totalItems || 0}\n`;
-      }
-    });
-    csv += '\n';
-    
-    return csv;
-  };
-
-  if (reportType === 'stock-full') {
-    let csv = '';
-    
-    // Header section
-    csv += 'COMPLETE INVENTORY REPORT\n';
-    csv += `Generated on: ${formatDate(new Date().toISOString())}\n\n`;
-    
-    // Gold Section
-    if (data.totalGoldGross > 0 || (data.categories && Object.keys(data.categories).filter(key => key.includes('_gold')).length > 0)) {
-      csv += 'GOLD INVENTORY SUMMARY\n';
-      csv += 'Metric,Value\n';
-      csv += `Total Gross Weight (g),${data.totalGoldGross || 0}\n`;
-      csv += `Total Pure Weight (g),${data.totalGoldPure || 0}\n`;
-      csv += `Average Purity (%),${data.goldAveragePurity || 0}\n\n`;
-
-      // Gold Category Breakdown
-      csv += 'GOLD CATEGORY BREAKDOWN\n';
-      csv += 'Category,Gross Weight (g),Pure Weight (g),Average Purity (%),Total Items\n';
-      
-      const goldCategories = Object.entries(data.categories || {}).filter(([key]) => key.includes('_gold'));
-      
-      if (goldCategories.length > 0) {
-        goldCategories.forEach(([category, categoryData]) => {
-          csv += `${category},${categoryData.grossWeight || 0},${categoryData.pureWeight || 0},${formatPurity(categoryData.averagePurity)},${categoryData.totalItems || 0}\n`;
-        });
-        csv += '\n';
-
-        // Gold Purity Breakdowns for each category
-        goldCategories.forEach(([category, categoryData]) => {
-          csv += addPurityBreakdownCSV(categoryData.purities, category, 'Gold');
-        });
-
-        // Gold Category Distribution
-        csv += 'GOLD CATEGORY DISTRIBUTION (By Pure Weight)\n';
-        csv += 'Category,Pure Weight (g),Percentage (%)\n';
-        const totalGoldPureWeight = data.totalGoldPure || 0;
-        goldCategories.forEach(([category, categoryData]) => {
-          if (categoryData.pureWeight > 0) {
-            const percentage = totalGoldPureWeight > 0 ? 
-              Math.floor((categoryData.pureWeight / totalGoldPureWeight) * 10000) / 100 : 0;
-            csv += `${category},${categoryData.pureWeight},${percentage}\n`;
-          }
-        });
-        csv += '\n';
-      } else {
-        csv += 'No gold category data available\n\n';
-      }
+    if (data.byMetal?.silver && data.byMetal.silver.totalRevenue > 0) {
+      let silverItemsSold = data.topPerformers ? data.topPerformers.filter(i => i.metalType === 'silver').reduce((s, i) => s + (i.totalItems || 0), 0) : 0;
+      csv += `Silver Sales\nRevenue,Rs ${(data.byMetal.silver.totalRevenue || 0).toLocaleString()}\nGross Weight,${data.byMetal.silver.totalWeight || 0} grams\nPure Weight,${data.byMetal.silver.totalPureWeight || 0} grams\nTotal Items Sold,${silverItemsSold} items\n\n`;
     }
-    
-    // Silver Section
-    if (data.totalSilverGross > 0 || (data.categories && Object.keys(data.categories).filter(key => key.includes('_silver')).length > 0)) {
-      csv += 'SILVER INVENTORY SUMMARY\n';
-      csv += 'Metric,Value\n';
-      csv += `Total Gross Weight (g),${data.totalSilverGross || 0}\n`;
-      csv += `Total Pure Weight (g),${data.totalSilverPure || 0}\n`;
-      csv += `Average Purity (%),${data.silverAveragePurity || 0}\n\n`;
-
-      // Silver Category Breakdown
-      csv += 'SILVER CATEGORY BREAKDOWN\n';
-      csv += 'Category,Gross Weight (g),Pure Weight (g),Average Purity (%),Total Items\n';
-      
-      const silverCategories = Object.entries(data.categories || {}).filter(([key]) => key.includes('_silver'));
-      
-      if (silverCategories.length > 0) {
-        silverCategories.forEach(([category, categoryData]) => {
-          csv += `${category},${categoryData.grossWeight || 0},${categoryData.pureWeight || 0},${formatPurity(categoryData.averagePurity)},${categoryData.totalItems || 0}\n`;
-        });
-        csv += '\n';
-
-        // Silver Purity Breakdowns for each category
-        silverCategories.forEach(([category, categoryData]) => {
-          csv += addPurityBreakdownCSV(categoryData.purities, category, 'Silver');
-        });
-
-        // Silver Category Distribution
-        csv += 'SILVER CATEGORY DISTRIBUTION (By Pure Weight)\n';
-        csv += 'Category,Pure Weight (g),Percentage (%)\n';
-        const totalSilverPureWeight = data.totalSilverPure || 0;
-        silverCategories.forEach(([category, categoryData]) => {
-          if (categoryData.pureWeight > 0) {
-            const percentage = totalSilverPureWeight > 0 ? 
-              Math.floor((categoryData.pureWeight / totalSilverPureWeight) * 10000) / 100 : 0;
-            csv += `${category},${categoryData.pureWeight},${percentage}\n`;
-          }
-        });
-        csv += '\n';
-      } else {
-        csv += 'No silver category data available\n\n';
-      }
-    }
-    
-    return csv;
-    
-  } else {
-    // Single metal report
-    const metalType = reportType === 'stock-gold' ? 'GOLD' : 'SILVER';
-    let csv = '';
-    
-    // Header
-    csv += `${metalType} INVENTORY REPORT\n`;
-    csv += `Generated on: ${formatDate(new Date().toISOString())}\n\n`;
-    
-    // Summary section
-    if (data.categories && Object.keys(data.categories).length > 0) {
-      csv += `${metalType} INVENTORY SUMMARY\n`;
-      csv += 'Metric,Value\n';
-      csv += `Total Gross Weight (g),${data.totalGross || 0}\n`;
-      csv += `Total Pure Weight (g),${data.totalPure || 0}\n`;
-      csv += `Average Purity (%),${data.averagePurity || 0}\n\n`;
-
-      // Category breakdown
-      csv += `${metalType} CATEGORY BREAKDOWN\n`;
-      csv += 'Category,Gross Weight (g),Pure Weight (g),Average Purity (%),Total Items\n';
-      
-      Object.entries(data.categories).forEach(([category, categoryData]) => {
-        csv += `${category},${categoryData.grossWeight || 0},${categoryData.pureWeight || 0},${formatPurity(categoryData.averagePurity)},${categoryData.totalItems || 0}\n`;
+    if (data.topPerformers && data.topPerformers.length > 0) {
+      csv += 'TOP REVENUE GENERATORS\nRank,Metal Type,Category,Purity (%),Revenue,Gross Weight (g),Pure Weight (g),Items Sold\n';
+      [...data.topPerformers].sort((a, b) => (b.totalSalesAmount || 0) - (a.totalSalesAmount || 0)).slice(0, 10).forEach((item, i) => {
+        csv += `${i + 1},${item.metalType || 'N/A'},${item.category || 'N/A'},${item.purity || 0},Rs ${(item.totalSalesAmount || 0).toLocaleString()},${item.totalGrossWeight || 0},${item.totalPureWeight || 0},${item.totalItems || 0}\n`;
       });
       csv += '\n';
-
-      // Purity breakdowns for each category
-      Object.entries(data.categories).forEach(([category, categoryData]) => {
-        csv += addPurityBreakdownCSV(categoryData.purities, category);
-      });
-
-      // Category distribution
-      csv += `${metalType} CATEGORY DISTRIBUTION (By Pure Weight)\n`;
-      csv += 'Category,Pure Weight (g),Percentage (%)\n';
-      const totalPureWeight = data.totalPure || 0;
-      Object.entries(data.categories).forEach(([category, categoryData]) => {
-        if (categoryData.pureWeight > 0) {
-          const percentage = totalPureWeight > 0 ? 
-            Math.floor((categoryData.pureWeight / totalPureWeight) * 10000) / 100 : 0;
-          csv += `${category},${categoryData.pureWeight},${percentage}\n`;
-        }
-      });
-      csv += '\n';
-    } else {
-      csv += `No ${metalType.toLowerCase()} data available\n\n`;
     }
-    
     return csv;
-  }
-};
+  };
 
-
-
- // Fetch sales data
-const fetchSalesData = async (startDate = '', endDate = '') => {
-  setLoading(prev => ({ ...prev, sales: true }));
-  try {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      setError('Authentication token not found. Please login again.');
-      return;
+  const downloadSalesExcel = async (data) => {
+    if (!data || !data.summary) { alert('No data available for download'); return; }
+    try {
+      const wb = generateSalesExcel(data);
+      const date = new Date();
+      const formattedDate = `${String(date.getDate()).padStart(2,'0')}-${String(date.getMonth()+1).padStart(2,'0')}-${date.getFullYear()}`;
+      await saveWorkbook(wb, `sales_report_${formattedDate}.xlsx`);
+    } catch (error) {
+      console.error('Excel Download Error:', error);
+      alert('Error generating Excel file');
     }
+  };
 
-    const params = new URLSearchParams();
-    // Convert display format (DD/MM/YYYY) to API format (YYYY-MM-DD)
-    if (startDate) params.append('startDate', formatDateForAPI(startDate));
-    if (endDate) params.append('endDate', formatDateForAPI(endDate));
-    
-    console.log('Date conversion for API:', {
-      originalStartDate: startDate,
-      originalEndDate: endDate,
-      apiStartDate: formatDateForAPI(startDate),
-      apiEndDate: formatDateForAPI(endDate)
-    });
-
-    const response = await api.get(`/api/reports/sales?${params}`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    
-    const data = response.data;
-    
-    console.log('Sales API Response:', data);
-    console.log('Sales Report Data:', data.salesReport);
-    
-    setSalesData(data.salesReport);
-  } catch (error) {
-    setError('Failed to load sales data');
-    console.error('Sales data error:', error);
-  } finally {
-    setLoading(prev => ({ ...prev, sales: false }));
-  }
-};
-
-const getTodayFormatted = () => {
-  const today = new Date();
-  return formatDateForAPI(formatDateObjectForDisplay(today));
-};
-
-// Initialize your dateRange state with today's date as default
-const [dateRange, setDateRange] = useState({
-  startDate: getTodayFormatted(),
-  endDate: getTodayFormatted()
-});
-
-// Initial data fetch on component mount
-useEffect(() => {
-  fetchSalesData(dateRange.startDate, dateRange.endDate);
-}, []); // Empty dependency array - runs once on mount
-// Refresh sales data when date range changes (after initial mount)
-useEffect(() => {
-  if (dateRange.startDate && dateRange.endDate) {
-    fetchSalesData(dateRange.startDate, dateRange.endDate);
-  } else {
-    // For "All Time" selection (empty dates)
-    fetchSalesData();
-  }
-}, [dateRange]); // Runs when dateRange changes
-// Handle date range selection
-const handleDateRangeChange = (type, value) => {
-  setDateRange(prev => ({ ...prev, [type]: value }));
-};
-// Handle quick date selection
-const handleQuickDateSelect = (period) => {
-  const now = new Date();
-  let startDate, endDate;
-  
-  switch (period) {
-    case 'today':
-      const today = new Date();
-      startDate = formatDateForAPI(formatDateObjectForDisplay(today)); // Convert to ISO
-      endDate = formatDateForAPI(formatDateObjectForDisplay(today));   // Convert to ISO
-      break;
-    case 'week':
-      const weekStart = new Date();
-      weekStart.setDate(now.getDate() - 7);
-      startDate = formatDateForAPI(formatDateObjectForDisplay(weekStart));
-      endDate = formatDateForAPI(formatDateObjectForDisplay(now));
-      break;
-    case 'month':
-      const monthStart = new Date();
-      monthStart.setMonth(now.getMonth() - 1);
-      startDate = formatDateForAPI(formatDateObjectForDisplay(monthStart));
-      endDate = formatDateForAPI(formatDateObjectForDisplay(now));
-      break;
-    case '6months':
-      const sixMonthsStart = new Date();
-      sixMonthsStart.setMonth(now.getMonth() - 6);
-      startDate = formatDateForAPI(formatDateObjectForDisplay(sixMonthsStart));
-      endDate = formatDateForAPI(formatDateObjectForDisplay(now));
-      break;
-    case 'year':
-      const yearStart = new Date();
-      yearStart.setFullYear(now.getFullYear() - 1);
-      startDate = formatDateForAPI(formatDateObjectForDisplay(yearStart));
-      endDate = formatDateForAPI(formatDateObjectForDisplay(now));
-      break;
-    case 'alltime':
-      setDateRange({
-        startDate: '',
-        endDate: ''
+  // ── Fetch customers data ──────────────────────────────────────────────
+  const fetchCustomersData = async () => {
+    setLoading(prev => ({ ...prev, customers: true }));
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) { setError('Authentication token not found. Please login again.'); return; }
+      const params = new URLSearchParams();
+      params.append('includeName', customerFields.name.toString());
+      params.append('includeAddress', customerFields.address.toString());
+      params.append('includeMobile', customerFields.mobile.toString());
+      params.append('includePurchaseAmount', customerFields.purchaseAmount.toString());
+      params.append('includePurchaseItems', customerFields.purchaseItems.toString());
+      const response = await api.get(`/api/reports/customers?${params}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
       });
-      return;
-    default:
-      return;
-  }
-  
-  setDateRange({
-    startDate: startDate,
-    endDate: endDate
-  });
-};
+      setCustomersData(response.data.customerReport);
+    } catch (error) {
+      setError('Failed to load customer data');
+      console.error('Customer data error:', error);
+    } finally {
+      setLoading(prev => ({ ...prev, customers: false }));
+    }
+  };
 
-const generateSalesPDFReport = async (data, filename) => {
-  try {
+  // ── Customer download ─────────────────────────────────────────────────
+  const handleCustomerDownload = async (format, customerFields) => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) { setError('Authentication token not found. Please login again.'); return; }
+      setLoading(prev => ({ ...prev, customers: true }));
+      const fieldsToInclude = [];
+      if (customerFields.name) fieldsToInclude.push('customerName');
+      if (customerFields.mobile) fieldsToInclude.push('customerMobile');
+      if (customerFields.address) fieldsToInclude.push('customerAddress');
+      if (customerFields.purchaseAmount) fieldsToInclude.push('totalPurchaseAmount');
+      if (customerFields.purchaseItems) fieldsToInclude.push('transactions');
+      const response = await api.post('/api/reports/download', {
+        reportType: 'customers', format, includeEntries: true, fields: fieldsToInclude,
+        fieldSelection: { includeName: customerFields.name, includeAddress: customerFields.address, includeMobile: customerFields.mobile, includePurchaseAmount: customerFields.purchaseAmount, includePurchaseItems: customerFields.purchaseItems }
+      }, { headers: { 'Authorization': `Bearer ${token}` } });
+      const data = response.data;
+      if (data.message && !data.downloadReady) throw new Error(data.message);
+      if (data.downloadReady && data.downloadData) {
+        const filename = getFilename('customers', format, new Date().getTime());
+        const reportData = data.downloadData.data;
+        if (format === 'pdf') await generateCustomerPDFReport(reportData, filename, customerFields);
+        else if (format === 'excel') await generateCustomerExcelReport(reportData, filename, customerFields);
+        else if (format === 'csv') await generateCustomerCSVReport(reportData, filename, customerFields);
+        alert(`Customer ${format.toUpperCase()} report downloaded successfully!`);
+        return;
+      }
+    } catch (error) {
+      console.error('Customer download error:', error);
+      setError(`Failed to download customer report: ${error.message}`);
+      alert(`Customer download failed: ${error.message}`);
+    } finally {
+      setLoading(prev => ({ ...prev, customers: false }));
+    }
+  };
+
+  const isValidValue = (value) => value && value !== null && value !== undefined && value !== '' && value !== 'N/A' && value !== 'null';
+
+  const formatPurchaseItems = (transactions) => {
+    if (!transactions || transactions.length === 0) return 'No purchases';
+    const itemSummary = transactions.reduce((acc, transaction) => {
+      const key = `${transaction.metalType}-${transaction.category}`;
+      if (!acc[key]) acc[key] = { metalType: transaction.metalType, category: transaction.category, count: 0, totalWeight: 0, totalAmount: 0 };
+      acc[key].count += transaction.itemCount || 1;
+      acc[key].totalWeight += transaction.weight || 0;
+      acc[key].totalAmount += transaction.amount || 0;
+      return acc;
+    }, {});
+    return Object.values(itemSummary).map(item => `${item.count} ${item.metalType} ${item.category} (${item.totalWeight.toFixed(3)}g)`).join(', ');
+  };
+
+  // ── Customer PDF ──────────────────────────────────────────────────────
+  const generateCustomerPDFReport = async (reportData, filename, selectedFields) => {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
-    
     let yPosition = 20;
     const pageHeight = doc.internal.pageSize.height;
     const margin = 20;
-    const lineHeight = 6;
-    
-    // Simple text function - no complex formatting
-    const addText = (text, fontSize = 10, isBold = false, leftMargin = 0) => {
-      if (yPosition > pageHeight - 30) {
-        doc.addPage();
-        yPosition = 20;
-      }
-      
-      doc.setFont('helvetica', isBold ? 'bold' : 'normal');
-      doc.setFontSize(fontSize);
-      doc.text(text, margin + leftMargin, yPosition);
-      yPosition += fontSize + 2;
+
+    const addCustomerText = (text, fontSize = 10) => {
+      doc.setFontSize(fontSize); doc.setFont("helvetica", "normal");
+      doc.text(text, margin, yPosition); yPosition += fontSize + 3;
     };
-    
-    const addSpace = (space = 5) => {
-      yPosition += space;
+    const checkCustomerNewPage = (requiredSpace = 10) => {
+      if (yPosition + requiredSpace > pageHeight - margin) { doc.addPage(); yPosition = 20; }
     };
-    
-    // Generate clean PDF
-    generateCleanSalesPDF(doc, data, { addText, addSpace });
-    
-    // Save the PDF
-    doc.save(filename);
-    
-  } catch (error) {
-    console.error('PDF generation error:', error);
-    throw new Error('Failed to generate PDF report');
-  }
-};
-// Clean PDF Generation - Updated to use DD/MM/YYYY format
-const generateCleanSalesPDF = (doc, data, { addText, addSpace }) => {
-  
-  // Title
-  addText('SALES REPORT', 16, true);
-  addSpace(5);
-  
-  // Date info - Format dates as DD/MM/YYYY
-  if (data.dateRange) {
-    const startDate = data.dateRange.startDate ? formatAPIDateForDisplay(data.dateRange.startDate) : 'Start';
-    const endDate = data.dateRange.endDate ? formatAPIDateForDisplay(data.dateRange.endDate) : 'End';
-    addText(`Report Period: ${startDate} to ${endDate}`, 10);
-    addText(`Generated on: ${formatDateObjectForDisplay(new Date())}`, 10);
-  }
-  
-  addSpace(10);
-  
-  // Summary
-  if (data.summary) {
-    addText('EXECUTIVE SUMMARY', 12, true);
-    addSpace(3);
-    
-    addText(`Total Revenue: Rs ${(data.summary.totalRevenue || 0).toLocaleString()}`, 10);
-    addText(`Total Items Sold: ${data.summary.totalItems || 0} items`, 10);
-    
-    const avgSale = data.summary.totalItems ? Math.round(data.summary.totalRevenue / data.summary.totalItems) : 0;
-    addText(`Average Sale Value: Rs ${avgSale.toLocaleString()}`, 10);
-  }
-  
-  addSpace(15);
-  
-  // Metal Performance
-  if (data.byMetal) {
-    addText('METAL-WISE PERFORMANCE', 12, true);
-    addSpace(5);
-    
-    // Gold Sales
-    if (data.byMetal.gold && data.byMetal.gold.totalRevenue > 0) {
-      addText('Gold Sales:', 11, true);
-      addText(`Revenue: Rs ${(data.byMetal.gold.totalRevenue || 0).toLocaleString()}`, 10);
-      addText(`Gross Weight: ${data.byMetal.gold.totalWeight || 0} grams`, 10);
-      addText(`Pure Weight: ${data.byMetal.gold.totalPureWeight || 0} grams`, 10);
-      
-      // Calculate total items sold for gold from topPerformers or use summary data
-      let goldItemsSold = 0;
-      if (data.topPerformers && data.topPerformers.length > 0) {
-        goldItemsSold = data.topPerformers
-          .filter(item => item.metalType === 'gold')
-          .reduce((sum, item) => sum + (item.totalItems || 0), 0);
-      }
-      
-      // If no topPerformers data, try to calculate from summary
-      if (goldItemsSold === 0 && data.summary && data.summary.totalItems) {
-        // Estimate based on proportion of gold revenue
-        const goldProportion = data.byMetal.gold.totalRevenue / (data.summary.totalRevenue || 1);
-        goldItemsSold = Math.round(data.summary.totalItems * goldProportion);
-      }
-      
-      addText(`Total Items Sold: ${goldItemsSold} items`, 10);
-      addSpace(8);
-    }
-    
-    // Silver Sales
-    if (data.byMetal.silver && data.byMetal.silver.totalRevenue > 0) {
-      addText('Silver Sales:', 11, true);
-      addText(`Revenue: Rs ${(data.byMetal.silver.totalRevenue || 0).toLocaleString()}`, 10);
-      addText(`Gross Weight: ${data.byMetal.silver.totalWeight || 0} grams`, 10);
-      addText(`Pure Weight: ${data.byMetal.silver.totalPureWeight || 0} grams`, 10);
-      
-      // Calculate total items sold for silver from topPerformers or use summary data
-      let silverItemsSold = 0;
-      if (data.topPerformers && data.topPerformers.length > 0) {
-        silverItemsSold = data.topPerformers
-          .filter(item => item.metalType === 'silver')
-          .reduce((sum, item) => sum + (item.totalItems || 0), 0);
-      }
-      
-      // If no topPerformers data, try to calculate from summary
-      if (silverItemsSold === 0 && data.summary && data.summary.totalItems) {
-        // Estimate based on proportion of silver revenue
-        const silverProportion = data.byMetal.silver.totalRevenue / (data.summary.totalRevenue || 1);
-        silverItemsSold = Math.round(data.summary.totalItems * silverProportion);
-      }
-      
-      addText(`Total Items Sold: ${silverItemsSold} items`, 10);
-      addSpace(8);
-    }
-  }
-  
-  addSpace(10);
-  
-  // Top Revenue Generators
-  if (data.topPerformers && data.topPerformers.length > 0) {
-    addText('TOP REVENUE GENERATORS', 12, true);
-    addSpace(5);
-    
-    // Sort by revenue and take top 10
-    const topRevenueItems = [...data.topPerformers]
-      .sort((a, b) => (b.totalSalesAmount || 0) - (a.totalSalesAmount || 0))
-      .slice(0, 10);
-    
-    topRevenueItems.forEach((item, index) => {
-      const itemNum = index + 1;
-      const metalType = item.metalType || 'N/A';
-      const category = item.category || 'N/A';
-      const purity = item.purity || 0;
-      const revenue = (item.totalSalesAmount || 0).toLocaleString();
-      const grossWeight = item.totalGrossWeight || 0;
-      const pureWeight = item.totalPureWeight || 0;
-      const totalItems = item.totalItems || 0;
-      
-      addText(`${itemNum}. ${metalType} ${category} (${purity}% purity)`, 10, true);
-      addText(`   Revenue: Rs ${revenue}`, 10);
-      addText(`   Weight: ${grossWeight}g gross, ${pureWeight}g pure`, 10);
-      addText(`   Items Sold: ${totalItems} items`, 10);
-      addSpace(3);
-    });
-  }
-  
-  addSpace(15);
-  
-  // Top Sold Quantity Items
-  if (data.topPerformers && data.topPerformers.length > 0) {
-    addText('TOP SOLD QUANTITY ITEMS', 12, true);
-    addSpace(5);
-    
-    // Sort by total items sold and take top 10
-    const topQuantityItems = [...data.topPerformers]
-      .sort((a, b) => (b.totalItems || 0) - (a.totalItems || 0))
-      .slice(0, 10);
-    
-    topQuantityItems.forEach((item, index) => {
-      const itemNum = index + 1;
-      const metalType = item.metalType || 'N/A';
-      const category = item.category || 'N/A';
-      const purity = item.purity || 0;
-      const totalItems = item.totalItems || 0;
-      const revenue = (item.totalSalesAmount || 0).toLocaleString();
-      const grossWeight = item.totalGrossWeight || 0;
-      const pureWeight = item.totalPureWeight || 0;
-      
-      addText(`${itemNum}. ${metalType} ${category} (${purity}% purity)`, 10, true);
-      addText(`   Items Sold: ${totalItems} items`, 10);
-      addText(`   Revenue: Rs ${revenue}`, 10);
-      addText(`   Weight: ${grossWeight}g gross, ${pureWeight}g pure`, 10);
-      addSpace(3);
-    });
-  }
-  
-  addSpace(15);
-  
-  // Gold Weight Leaders
-  if (data.topPerformers && data.topPerformers.length > 0) {
-    const goldItems = data.topPerformers.filter(item => item.metalType === 'gold');
-    
-    if (goldItems.length > 0) {
-      addText('GOLD WEIGHT LEADERS', 12, true);
-      addSpace(5);
-      
-      // Sort by gross weight and take top 10
-      const goldWeightLeaders = [...goldItems]
-        .sort((a, b) => (b.totalGrossWeight || 0) - (a.totalGrossWeight || 0))
-        .slice(0, 10);
-      
-      goldWeightLeaders.forEach((item, index) => {
-        const itemNum = index + 1;
-        const category = item.category || 'N/A';
-        const purity = item.purity || 0;
-        const grossWeight = item.totalGrossWeight || 0;
-        const pureWeight = item.totalPureWeight || 0;
-        const totalItems = item.totalItems || 0;
-        const revenue = (item.totalSalesAmount || 0).toLocaleString();
-        
-        addText(`${itemNum}. ${category} (${purity}% purity)`, 10, true);
-        addText(`   Weight: ${grossWeight}g gross, ${pureWeight}g pure`, 10);
-        addText(`   Items Sold: ${totalItems} items`, 10);
-        addText(`   Revenue: Rs ${revenue}`, 10);
-        addSpace(3);
+
+    addCustomerText('Customer Report', 16);
+    addCustomerText(`Generated: ${new Date().toLocaleDateString('en-GB')}`, 10);
+    addCustomerText('', 5);
+
+    if (reportData.customers && reportData.customers.length > 0) {
+      let validCustomerIndex = 0;
+      reportData.customers.forEach((customer) => {
+        let hasAllSelectedFields = true;
+        if (selectedFields.name && !isValidValue(customer.customerName)) hasAllSelectedFields = false;
+        if (selectedFields.mobile && !isValidValue(customer.customerMobile)) hasAllSelectedFields = false;
+        if (selectedFields.address && !isValidValue(customer.customerAddress)) hasAllSelectedFields = false;
+        if (selectedFields.purchaseAmount && (!isValidValue(customer.totalPurchaseAmount) || customer.totalPurchaseAmount <= 0)) hasAllSelectedFields = false;
+        if (selectedFields.purchaseItems && (!customer.transactions || customer.transactions.length === 0)) hasAllSelectedFields = false;
+        if (hasAllSelectedFields) {
+          checkCustomerNewPage(40);
+          validCustomerIndex++;
+          let customerLine = `${validCustomerIndex}. `;
+          let isFirstField = true;
+          if (selectedFields.name) { customerLine += customer.customerName; isFirstField = false; }
+          if (selectedFields.mobile) { customerLine += isFirstField ? customer.customerMobile : ` | ${customer.customerMobile}`; isFirstField = false; }
+          if (selectedFields.address) { customerLine += isFirstField ? customer.customerAddress : ` | ${customer.customerAddress}`; isFirstField = false; }
+          if (selectedFields.purchaseAmount) { customerLine += isFirstField ? `Rs.${customer.totalPurchaseAmount}` : ` | Rs.${customer.totalPurchaseAmount}`; isFirstField = false; }
+          addCustomerText(customerLine, 10);
+          if (selectedFields.purchaseItems && customer.transactions) addCustomerText(`   Items: ${formatPurchaseItems(customer.transactions)}`, 9);
+          addCustomerText('', 3);
+        }
       });
     }
-  }
-  
-  addSpace(15);
-  
-  // Silver Weight Leaders
-  if (data.topPerformers && data.topPerformers.length > 0) {
-    const silverItems = data.topPerformers.filter(item => item.metalType === 'silver');
-    
-    if (silverItems.length > 0) {
-      addText('SILVER WEIGHT LEADERS', 12, true);
-      addSpace(5);
-      
-      // Sort by gross weight and take top 10
-      const silverWeightLeaders = [...silverItems]
-        .sort((a, b) => (b.totalGrossWeight || 0) - (a.totalGrossWeight || 0))
-        .slice(0, 10);
-      
-      silverWeightLeaders.forEach((item, index) => {
-        const itemNum = index + 1;
-        const category = item.category || 'N/A';
-        const purity = item.purity || 0;
-        const grossWeight = item.totalGrossWeight || 0;
-        const pureWeight = item.totalPureWeight || 0;
-        const totalItems = item.totalItems || 0;
-        const revenue = (item.totalSalesAmount || 0).toLocaleString();
-        
-        addText(`${itemNum}. ${category} (${purity}% purity)`, 10, true);
-        addText(`   Weight: ${grossWeight}g gross, ${pureWeight}g pure`, 10);
-        addText(`   Items Sold: ${totalItems} items`, 10);
-        addText(`   Revenue: Rs ${revenue}`, 10);
-        addSpace(3);
-      });
-    }
-  }
-  
-  addSpace(15);
-  
-  // Recent Sales - Only show if entries are included
-  if (data.entries && data.entries.length > 0) {
-    addText('RECENT SALES TRANSACTIONS', 12, true);
-    addSpace(5);
-    
-    data.entries.slice(0, 20).forEach((entry, index) => {
-      const entryNum = index + 1;
-      const date = formatAPIDateForDisplay(entry.soldAt); // Use DD/MM/YYYY format
-      const metalType = entry.metalType || 'N/A';
-      const category = entry.category || 'N/A';
-      const purity = entry.purity || 0;
-      const weight = entry.weight || 0;
-      const price = (entry.salesPrice || 0).toLocaleString();
-      const isBulk = entry.isBulk || false;
-      const itemCount = entry.itemCount || 1;
-      
-      addText(`${entryNum}. ${date} - ${metalType} ${category}`, 10, true);
-      addText(`   Purity: ${purity}%, Weight: ${weight}g`, 10);
-      addText(`   Price: Rs ${price}`, 10);
-      
-      // Show quantity sold
-      if (isBulk) {
-        addText(`   Quantity: ${itemCount} items (Bulk Sale)`, 10);
-      } else {
-        addText(`   Quantity: 1 item`, 10);
-      }
-      
-      // Customer Information - show all available details
-      const customerInfo = [];
-      if (entry.customerName) {
-        customerInfo.push(`Name: ${entry.customerName}`);
-      }
-      if (entry.customerMobile) {
-        customerInfo.push(`Mobile: ${entry.customerMobile}`);
-      }
-      if (entry.customerAddress) {
-        customerInfo.push(`Address: ${entry.customerAddress}`);
-      }
-      
-      if (customerInfo.length > 0) {
-        addText(`   Customer: ${customerInfo.join(', ')}`, 10);
-      } else {
-        addText(`   Customer: Not provided`, 10);
-      }
-      
-      addSpace(3);
-    });
-    
-    if (data.entries.length > 20) {
-      addSpace(5);
-      addText(`Note: Showing recent 20 transactions out of ${data.entries.length} total`, 9);
-    }
-  } else {
-    // Show a note when entries are not included
-    addText('SALES TRANSACTIONS', 12, true);
-    addSpace(5);
-    addText('Individual transaction details are not included in this report.', 10);
-    addText('To view transaction details, enable "Include Entries" option when generating the report.', 10);
-  }
-  
-  // Footer
-  addSpace(15);
-  addText('This report is system generated and contains confidential business information.', 8);
-  addText(`Report ID: RPT-${Date.now()}`, 8);
-};
-// Enhanced Excel Generation for Sales Report - Updated with DD/MM/YYYY format
-const generateSalesExcel = (data) => {
-  const wb = XLSX.utils.book_new();
-  
-  // Summary Sheet - Matches PDF Executive Summary
-  const summaryData = [
-    ['SALES REPORT'],
-    [''],
-    ['EXECUTIVE SUMMARY'],
-    ['Report Period', `${data.dateRange?.startDate ? formatAPIDateForDisplay(data.dateRange.startDate) : 'Start'} to ${data.dateRange?.endDate ? formatAPIDateForDisplay(data.dateRange.endDate) : 'End'}`],
-    ['Generated on', formatDateObjectForDisplay(new Date())],
-    [''],
-    ['Total Revenue', `Rs ${(data.summary?.totalRevenue || 0).toLocaleString()}`],
-    ['Total Items Sold', `${data.summary?.totalItems || 0} items`],
-    ['Average Sale Value', `Rs ${data.summary?.totalItems ? Math.round(data.summary.totalRevenue / data.summary.totalItems).toLocaleString() : 0}`],
-    [''],
-    ['METAL-WISE PERFORMANCE'],
-    ['']
-  ];
-  
-  // Add Gold Sales if exists
-  if (data.byMetal?.gold && data.byMetal.gold.totalRevenue > 0) {
-    let goldItemsSold = 0;
-    if (data.topPerformers && data.topPerformers.length > 0) {
-      goldItemsSold = data.topPerformers
-        .filter(item => item.metalType === 'gold')
-        .reduce((sum, item) => sum + (item.totalItems || 0), 0);
-    }
-    if (goldItemsSold === 0 && data.summary && data.summary.totalItems) {
-      const goldProportion = data.byMetal.gold.totalRevenue / (data.summary.totalRevenue || 1);
-      goldItemsSold = Math.round(data.summary.totalItems * goldProportion);
-    }
-    
-    summaryData.push(
-      ['Gold Sales', ''],
-      ['Revenue', `Rs ${(data.byMetal.gold.totalRevenue || 0).toLocaleString()}`],
-      ['Gross Weight', `${data.byMetal.gold.totalWeight || 0} grams`],
-      ['Pure Weight', `${data.byMetal.gold.totalPureWeight || 0} grams`],
-      ['Total Items Sold', `${goldItemsSold} items`],
-      ['']
-    );
-  }
-  
-  // Add Silver Sales if exists
-  if (data.byMetal?.silver && data.byMetal.silver.totalRevenue > 0) {
-    let silverItemsSold = 0;
-    if (data.topPerformers && data.topPerformers.length > 0) {
-      silverItemsSold = data.topPerformers
-        .filter(item => item.metalType === 'silver')
-        .reduce((sum, item) => sum + (item.totalItems || 0), 0);
-    }
-    if (silverItemsSold === 0 && data.summary && data.summary.totalItems) {
-      const silverProportion = data.byMetal.silver.totalRevenue / (data.summary.totalRevenue || 1);
-      silverItemsSold = Math.round(data.summary.totalItems * silverProportion);
-    }
-    
-    summaryData.push(
-      ['Silver Sales', ''],
-      ['Revenue', `Rs ${(data.byMetal.silver.totalRevenue || 0).toLocaleString()}`],
-      ['Gross Weight', `${data.byMetal.silver.totalWeight || 0} grams`],
-      ['Pure Weight', `${data.byMetal.silver.totalPureWeight || 0} grams`],
-      ['Total Items Sold', `${silverItemsSold} items`],
-      ['']
-    );
-  }
-  
-  const summaryWS = XLSX.utils.aoa_to_sheet(summaryData);
-  XLSX.utils.book_append_sheet(wb, summaryWS, 'Summary');
-  
-  // Top Revenue Generators Sheet - Matches PDF Top Revenue Generators
-  if (data.topPerformers && data.topPerformers.length > 0) {
-    const topRevenueItems = [...data.topPerformers]
-      .sort((a, b) => (b.totalSalesAmount || 0) - (a.totalSalesAmount || 0))
-      .slice(0, 10);
-    
-    const revenueData = [
-      ['TOP REVENUE GENERATORS'],
-      [''],
-      ['Rank', 'Metal Type', 'Category', 'Purity (%)', 'Revenue', 'Gross Weight (g)', 'Pure Weight (g)', 'Items Sold']
-    ];
-    
-    topRevenueItems.forEach((item, index) => {
-      revenueData.push([
-        index + 1,
-        item.metalType || 'N/A',
-        item.category || 'N/A',
-        item.purity || 0,
-        `Rs ${(item.totalSalesAmount || 0).toLocaleString()}`,
-        item.totalGrossWeight || 0,
-        item.totalPureWeight || 0,
-        item.totalItems || 0
-      ]);
-    });
-    
-    const revenueWS = XLSX.utils.aoa_to_sheet(revenueData);
-    XLSX.utils.book_append_sheet(wb, revenueWS, 'Top Revenue Generators');
-  }
-  
-  // Top Sold Quantity Items Sheet - Matches PDF Top Sold Quantity Items
-  if (data.topPerformers && data.topPerformers.length > 0) {
-    const topQuantityItems = [...data.topPerformers]
-      .sort((a, b) => (b.totalItems || 0) - (a.totalItems || 0))
-      .slice(0, 10);
-    
-    const quantityData = [
-      ['TOP SOLD QUANTITY ITEMS'],
-      [''],
-      ['Rank', 'Metal Type', 'Category', 'Purity (%)', 'Items Sold', 'Revenue', 'Gross Weight (g)', 'Pure Weight (g)']
-    ];
-    
-    topQuantityItems.forEach((item, index) => {
-      quantityData.push([
-        index + 1,
-        item.metalType || 'N/A',
-        item.category || 'N/A',
-        item.purity || 0,
-        item.totalItems || 0,
-        `Rs ${(item.totalSalesAmount || 0).toLocaleString()}`,
-        item.totalGrossWeight || 0,
-        item.totalPureWeight || 0
-      ]);
-    });
-    
-    const quantityWS = XLSX.utils.aoa_to_sheet(quantityData);
-    XLSX.utils.book_append_sheet(wb, quantityWS, 'Top Sold Quantity');
-  }
-  
-  // Gold Weight Leaders Sheet - Matches PDF Gold Weight Leaders
-  if (data.topPerformers && data.topPerformers.length > 0) {
-    const goldItems = data.topPerformers.filter(item => item.metalType === 'gold');
-    
-    if (goldItems.length > 0) {
-      const goldWeightLeaders = [...goldItems]
-        .sort((a, b) => (b.totalGrossWeight || 0) - (a.totalGrossWeight || 0))
-        .slice(0, 10);
-      
-      const goldData = [
-        ['GOLD WEIGHT LEADERS'],
-        [''],
-        ['Rank', 'Category', 'Purity (%)', 'Gross Weight (g)', 'Pure Weight (g)', 'Items Sold', 'Revenue']
-      ];
-      
-      goldWeightLeaders.forEach((item, index) => {
-        goldData.push([
-          index + 1,
-          item.category || 'N/A',
-          item.purity || 0,
-          item.totalGrossWeight || 0,
-          item.totalPureWeight || 0,
-          item.totalItems || 0,
-          `Rs ${(item.totalSalesAmount || 0).toLocaleString()}`
-        ]);
-      });
-      
-      const goldWS = XLSX.utils.aoa_to_sheet(goldData);
-      XLSX.utils.book_append_sheet(wb, goldWS, 'Gold Weight Leaders');
-    }
-  }
-  
-  // Silver Weight Leaders Sheet - Matches PDF Silver Weight Leaders
-  if (data.topPerformers && data.topPerformers.length > 0) {
-    const silverItems = data.topPerformers.filter(item => item.metalType === 'silver');
-    
-    if (silverItems.length > 0) {
-      const silverWeightLeaders = [...silverItems]
-        .sort((a, b) => (b.totalGrossWeight || 0) - (a.totalGrossWeight || 0))
-        .slice(0, 10);
-      
-      const silverData = [
-        ['SILVER WEIGHT LEADERS'],
-        [''],
-        ['Rank', 'Category', 'Purity (%)', 'Gross Weight (g)', 'Pure Weight (g)', 'Items Sold', 'Revenue']
-      ];
-      
-      silverWeightLeaders.forEach((item, index) => {
-        silverData.push([
-          index + 1,
-          item.category || 'N/A',
-          item.purity || 0,
-          item.totalGrossWeight || 0,
-          item.totalPureWeight || 0,
-          item.totalItems || 0,
-          `Rs ${(item.totalSalesAmount || 0).toLocaleString()}`
-        ]);
-      });
-      
-      const silverWS = XLSX.utils.aoa_to_sheet(silverData);
-      XLSX.utils.book_append_sheet(wb, silverWS, 'Silver Weight Leaders');
-    }
-  }
-  
-  // Recent Sales Transactions Sheet - Matches PDF Recent Sales Transactions
-  if (data.entries && data.entries.length > 0) {
-    const transactionData = [
-      ['RECENT SALES TRANSACTIONS'],
-      [''],
-      ['#', 'Date', 'Metal Type', 'Category', 'Purity (%)', 'Weight (g)', 'Price', 'Quantity', 'Customer Name', 'Customer Mobile', 'Customer Address']
-    ];
-    
-    data.entries.slice(0, 20).forEach((entry, index) => {
-      const date = formatAPIDateForDisplay(entry.soldAt); // Use DD/MM/YYYY format
-      const isBulk = entry.isBulk || false;
-      const itemCount = entry.itemCount || 1;
-      const quantity = isBulk ? `${itemCount} items (Bulk Sale)` : '1 item';
-      
-      transactionData.push([
-        index + 1,
-        date,
-        entry.metalType || 'N/A',
-        entry.category || 'N/A',
-        entry.purity || 0,
-        entry.weight || 0,
-        `Rs ${(entry.salesPrice || 0).toLocaleString()}`,
-        quantity,
-        entry.customerName || 'Not provided',
-        entry.customerMobile || 'Not provided',
-        entry.customerAddress || 'Not provided'
-      ]);
-    });
-    
-    if (data.entries.length > 20) {
-      transactionData.push(['', '', '', '', '', '', '', '', '', '', '']);
-      transactionData.push([`Note: Showing recent 20 transactions out of ${data.entries.length} total`, '', '', '', '', '', '', '', '', '', '']);
-    }
-    
-    const transactionWS = XLSX.utils.aoa_to_sheet(transactionData);
-    XLSX.utils.book_append_sheet(wb, transactionWS, 'Recent Transactions');
-  } else {
-    // Show note when entries are not included - matches PDF behavior
-    const transactionData = [
-      ['SALES TRANSACTIONS'],
-      [''],
-      ['Individual transaction details are not included in this report.'],
-      ['To view transaction details, enable "Include Entries" option when generating the report.']
-    ];
-    
-    const transactionWS = XLSX.utils.aoa_to_sheet(transactionData);
-    XLSX.utils.book_append_sheet(wb, transactionWS, 'Transactions Note');
-  }
-  
-  return wb;
-};
-// Simplified CSV Generation - Removed unused functions
-const formatSalesDataForCSV = (data) => {
-  let csv = '';
-  
-  // Add BOM for proper UTF-8 encoding
-  csv += '\uFEFF';
-  
-  // Summary Section - matches PDF structure
-  csv += 'SALES REPORT\n';
-  csv += '\n';
-  csv += 'EXECUTIVE SUMMARY\n';
-  csv += `Report Period,${data.dateRange?.startDate ? formatAPIDateForDisplay(data.dateRange.startDate) : 'Start'} to ${data.dateRange?.endDate ? formatAPIDateForDisplay(data.dateRange.endDate) : 'End'}\n`;
-  csv += `Generated on,${formatDateObjectForDisplay(new Date())}\n`;
-  csv += '\n';
-  csv += `Total Revenue,Rs ${(data.summary?.totalRevenue || 0).toLocaleString()}\n`;
-  csv += `Total Items Sold,${data.summary?.totalItems || 0} items\n`;
-  csv += `Average Sale Value,Rs ${data.summary?.totalItems ? Math.round(data.summary.totalRevenue / data.summary.totalItems).toLocaleString() : 0}\n`;
-  csv += '\n';
-  
-  // Metal-wise Performance
-  csv += 'METAL-WISE PERFORMANCE\n';
-  csv += '\n';
-  
-  if (data.byMetal?.gold && data.byMetal.gold.totalRevenue > 0) {
-    let goldItemsSold = 0;
-    if (data.topPerformers && data.topPerformers.length > 0) {
-      goldItemsSold = data.topPerformers
-        .filter(item => item.metalType === 'gold')
-        .reduce((sum, item) => sum + (item.totalItems || 0), 0);
-    }
-    if (goldItemsSold === 0 && data.summary && data.summary.totalItems) {
-      const goldProportion = data.byMetal.gold.totalRevenue / (data.summary.totalRevenue || 1);
-      goldItemsSold = Math.round(data.summary.totalItems * goldProportion);
-    }
-    
-    csv += 'Gold Sales\n';
-    csv += `Revenue,Rs ${(data.byMetal.gold.totalRevenue || 0).toLocaleString()}\n`;
-    csv += `Gross Weight,${data.byMetal.gold.totalWeight || 0} grams\n`;
-    csv += `Pure Weight,${data.byMetal.gold.totalPureWeight || 0} grams\n`;
-    csv += `Total Items Sold,${goldItemsSold} items\n`;
-    csv += '\n';
-  }
-  
-  if (data.byMetal?.silver && data.byMetal.silver.totalRevenue > 0) {
-    let silverItemsSold = 0;
-    if (data.topPerformers && data.topPerformers.length > 0) {
-      silverItemsSold = data.topPerformers
-        .filter(item => item.metalType === 'silver')
-        .reduce((sum, item) => sum + (item.totalItems || 0), 0);
-    }
-    if (silverItemsSold === 0 && data.summary && data.summary.totalItems) {
-      const silverProportion = data.byMetal.silver.totalRevenue / (data.summary.totalRevenue || 1);
-      silverItemsSold = Math.round(data.summary.totalItems * silverProportion);
-    }
-    
-    csv += 'Silver Sales\n';
-    csv += `Revenue,Rs ${(data.byMetal.silver.totalRevenue || 0).toLocaleString()}\n`;
-    csv += `Gross Weight,${data.byMetal.silver.totalWeight || 0} grams\n`;
-    csv += `Pure Weight,${data.byMetal.silver.totalPureWeight || 0} grams\n`;
-    csv += `Total Items Sold,${silverItemsSold} items\n`;
-    csv += '\n';
-  }
-  
-  // Top Revenue Generators
-  if (data.topPerformers && data.topPerformers.length > 0) {
-    csv += 'TOP REVENUE GENERATORS\n';
-    csv += 'Rank,Metal Type,Category,Purity (%),Revenue,Gross Weight (g),Pure Weight (g),Items Sold\n';
-    
-    const topRevenueItems = [...data.topPerformers]
-      .sort((a, b) => (b.totalSalesAmount || 0) - (a.totalSalesAmount || 0))
-      .slice(0, 10);
-    
-    topRevenueItems.forEach((item, index) => {
-      csv += `${index + 1},${item.metalType || 'N/A'},${item.category || 'N/A'},${item.purity || 0},Rs ${(item.totalSalesAmount || 0).toLocaleString()},${item.totalGrossWeight || 0},${item.totalPureWeight || 0},${item.totalItems || 0}\n`;
-    });
-    csv += '\n';
-  }
-  
-  return csv;
-};
-// Updated download function with DD/MM/YYYY format
-const downloadSalesExcel = (data) => {
-  console.log('Excel Download - Input data:', data);
-  
-  if (!data || !data.summary) {
-    console.error('Excel Download - No data available');
-    alert('No data available for download');
-    return;
-  }
-  
-  try {
-    const wb = generateSalesExcel(data);
-    console.log('Excel Download - Workbook created with sheets:', wb.SheetNames);
-    
-    // Format date as DD/MM/YYYY
-    const date = new Date();
-    const day = String(date.getDate()).padStart(2, '0');
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const year = date.getFullYear();
-    const formattedDate = `${day}-${month}-${year}`;
-    
-    XLSX.writeFile(wb, `sales_report_${formattedDate}.xlsx`);
-    console.log('Excel Download - File written successfully');
-  } catch (error) {
-    console.error('Excel Download - Error:', error);
-    alert('Error generating Excel file');
-  }
-};
-
-
-
-// Fetch customer data
-const fetchCustomersData = async () => {
-  setLoading(prev => ({ ...prev, customers: true }));
-  try {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      setError('Authentication token not found. Please login again.');
-      return;
-    }
-
-    const params = new URLSearchParams();
-    params.append('includeName', customerFields.name.toString());
-    params.append('includeAddress', customerFields.address.toString());
-    params.append('includeMobile', customerFields.mobile.toString());
-    params.append('includePurchaseAmount', customerFields.purchaseAmount.toString());
-    params.append('includePurchaseItems', customerFields.purchaseItems.toString());
-    
-    // const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/reports/customers?${params}`, {
-    //   headers: {
-    //     'Authorization': `Bearer ${token}`
-    //   }
-    // });
-    
-    // if (!response.ok) throw new Error('Failed to fetch customer data');
-    
-    // const data = await response.json();
-
-    const response = await api.get(`/api/reports/customers?${params}`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    
-    const data = response.data;
-
-    setCustomersData(data.customerReport);
-  } catch (error) {
-    setError('Failed to load customer data');
-    console.error('Customer data error:', error);
-  } finally {
-    setLoading(prev => ({ ...prev, customers: false }));
-  }
-};
-
-// Updated handleDownload function for customer reports with detailed transaction data
-const handleCustomerDownload = async (format, customerFields) => {
-  try {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      setError('Authentication token not found. Please login again.');
-      return;
-    }
-
-    setLoading(prev => ({ ...prev, customers: true }));
-
-    // Convert customerFields object to match backend expectation
-    const fieldsToInclude = [];
-    if (customerFields.name) fieldsToInclude.push('customerName');
-    if (customerFields.mobile) fieldsToInclude.push('customerMobile');
-    if (customerFields.address) fieldsToInclude.push('customerAddress');
-    if (customerFields.purchaseAmount) fieldsToInclude.push('totalPurchaseAmount');
-    if (customerFields.purchaseItems) fieldsToInclude.push('transactions'); // Changed to include transaction details
-
-    const response = await api.post('/api/reports/download', {
-      reportType: 'customers',
-      format,
-      includeEntries: true,
-      fields: fieldsToInclude,
-      fieldSelection: {
-        includeName: customerFields.name,
-        includeAddress: customerFields.address,
-        includeMobile: customerFields.mobile,
-        includePurchaseAmount: customerFields.purchaseAmount,
-        includePurchaseItems: customerFields.purchaseItems
-      }
-    }, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    
-    const data = response.data;
-
-    if (data.message && !data.downloadReady) {
-      throw new Error(data.message);
-    }
-
-    if (data.downloadReady && data.downloadData) {
-      const timestamp = new Date().toLocaleDateString('en-GB');
-      const filename = getFilename('customers', format, timestamp);
-      
-      const reportData = data.downloadData.data;
-      
-      console.log('Customer report data for download:', reportData);
-      
-      // Generate customer report based on format with selected fields
-      if (format === 'pdf') {
-        await generateCustomerPDFReport(reportData, filename, customerFields);
-      } else if (format === 'excel') {
-        generateCustomerExcelReport(reportData, filename, customerFields);
-      } else if (format === 'csv') {
-        generateCustomerCSVReport(reportData, filename, customerFields);
-      }
-      
-      alert(`Customer ${format.toUpperCase()} report downloaded successfully!`);
-      return;
-    }
-
-  } catch (error) {
-    console.error('Customer download error:', error);
-    setError(`Failed to download customer report: ${error.message}`);
-    alert(`Customer download failed: ${error.message}`);
-  } finally {
-    setLoading(prev => ({ ...prev, customers: false }));
-  }
-};
-
-// Helper function to check if value is valid (not null, undefined, empty, or "N/A")
-const isValidValue = (value) => {
-  return value && value !== null && value !== undefined && value !== '' && value !== 'N/A' && value !== 'null';
-};
-
-// Helper function to format purchase items for display
-const formatPurchaseItems = (transactions) => {
-  if (!transactions || transactions.length === 0) return 'No purchases';
-  
-  const itemSummary = transactions.reduce((acc, transaction) => {
-    const key = `${transaction.metalType}-${transaction.category}`;
-    if (!acc[key]) {
-      acc[key] = {
-        metalType: transaction.metalType,
-        category: transaction.category,
-        count: 0,
-        totalWeight: 0,
-        totalAmount: 0
-      };
-    }
-    acc[key].count += transaction.itemCount || 1;
-    acc[key].totalWeight += transaction.weight || 0;
-    acc[key].totalAmount += transaction.amount || 0;
-    return acc;
-  }, {});
-
-  return Object.values(itemSummary).map(item => 
-    `${item.count} ${item.metalType} ${item.category} (${item.totalWeight.toFixed(3)}g)`
-  ).join(', ');
-};
-
-// Customer PDF Generation Function - Updated with purchase items
-const generateCustomerPDFReport = async (reportData, filename, selectedFields) => {
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
-  
-  let yPosition = 20;
-  const pageHeight = doc.internal.pageSize.height;
-  const margin = 20;
-  
-  // Helper function to add text - simplified
-  const addCustomerText = (text, fontSize = 10) => {
-    doc.setFontSize(fontSize);
-    doc.setFont("helvetica", "normal");
-    doc.text(text, margin, yPosition);
-    yPosition += fontSize + 3;
+    await saveDoc(doc, filename);
   };
-  
-  // Helper function to check if new page is needed
-  const checkCustomerNewPage = (requiredSpace = 10) => {
-    if (yPosition + requiredSpace > pageHeight - margin) {
-      doc.addPage();
-      yPosition = 20;
-    }
-  };
-  
-  // Simple Header
-  addCustomerText('Customer Report', 16);
-  addCustomerText(`Generated: ${new Date().toLocaleDateString('en-GB')}`, 10);
-  addCustomerText('', 5);
-  
-  // Customer List - only customers with ALL selected fields having valid data (AND operation)
-  if (reportData.customers && reportData.customers.length > 0) {
-    let validCustomerIndex = 0;
-    
-    reportData.customers.forEach((customer) => {
-      // Check if customer has ALL selected fields with valid data (AND operation)
-      let hasAllSelectedFields = true;
-      
-      if (selectedFields.name && !isValidValue(customer.customerName)) {
-        hasAllSelectedFields = false;
-      }
-      
-      if (selectedFields.mobile && !isValidValue(customer.customerMobile)) {
-        hasAllSelectedFields = false;
-      }
-      
-      if (selectedFields.address && !isValidValue(customer.customerAddress)) {
-        hasAllSelectedFields = false;
-      }
-      
-      if (selectedFields.purchaseAmount && (!isValidValue(customer.totalPurchaseAmount) || customer.totalPurchaseAmount <= 0)) {
-        hasAllSelectedFields = false;
-      }
-      
-      if (selectedFields.purchaseItems && (!customer.transactions || customer.transactions.length === 0)) {
-        hasAllSelectedFields = false;
-      }
-      
-      // Only process customer if they have ALL selected fields with valid data
-      if (hasAllSelectedFields) {
-        checkCustomerNewPage(40); // More space needed for item details
-        validCustomerIndex++;
-        
-        let customerLine = `${validCustomerIndex}. `;
-        let isFirstField = true;
-        
-        // Add all selected fields (we know they all have valid data)
-        if (selectedFields.name) {
-          customerLine += `${customer.customerName}`;
-          isFirstField = false;
-        }
-        
-        if (selectedFields.mobile) {
-          customerLine += isFirstField ? `${customer.customerMobile}` : ` | ${customer.customerMobile}`;
-          isFirstField = false;
-        }
-        
-        if (selectedFields.address) {
-          customerLine += isFirstField ? `${customer.customerAddress}` : ` | ${customer.customerAddress}`;
-          isFirstField = false;
-        }
-        
-        if (selectedFields.purchaseAmount) {
-          customerLine += isFirstField ? `Rs.${customer.totalPurchaseAmount}` : ` | Rs.${customer.totalPurchaseAmount}`;
-          isFirstField = false;
-        }
-        
-        addCustomerText(customerLine, 10);
-        
-        // Add purchase items details if selected
-        if (selectedFields.purchaseItems && customer.transactions) {
-          const itemsText = `   Items: ${formatPurchaseItems(customer.transactions)}`;
-          addCustomerText(itemsText, 9);
-        }
-        
-        addCustomerText('', 3); // Add some spacing between customers
-      }
-    });
-  }
-  
-  // Save the PDF
-  doc.save(filename);
-};
 
-// Customer Excel Generation Function - Updated with purchase items
-const generateCustomerExcelReport = (reportData, filename, selectedFields) => {
-  const XLSX = window.XLSX;
-  const workbook = XLSX.utils.book_new();
-  
-  // Build dynamic headers based on selected fields
-  const customerHeaders = [];
-  if (selectedFields.name) customerHeaders.push('Customer Name');
-  if (selectedFields.mobile) customerHeaders.push('Mobile Number');
-  if (selectedFields.address) customerHeaders.push('Address');
-  if (selectedFields.purchaseAmount) customerHeaders.push('Total Purchase Amount (₹)');
-  if (selectedFields.purchaseItems) customerHeaders.push('Purchase Items Details');
-  
-  // Filter customers who have ALL selected fields with valid data (AND operation)
-  const validCustomers = reportData.customers.filter(customer => {
-    let hasAllSelectedFields = true;
-    
-    if (selectedFields.name && !isValidValue(customer.customerName)) {
-      hasAllSelectedFields = false;
-    }
-    
-    if (selectedFields.mobile && !isValidValue(customer.customerMobile)) {
-      hasAllSelectedFields = false;
-    }
-    
-    if (selectedFields.address && !isValidValue(customer.customerAddress)) {
-      hasAllSelectedFields = false;
-    }
-    
-    if (selectedFields.purchaseAmount && (!isValidValue(customer.totalPurchaseAmount) || customer.totalPurchaseAmount <= 0)) {
-      hasAllSelectedFields = false;
-    }
-    
-    if (selectedFields.purchaseItems && (!customer.transactions || customer.transactions.length === 0)) {
-      hasAllSelectedFields = false;
-    }
-    
-    return hasAllSelectedFields;
-  });
-  
-  // Build customer rows with only valid customers
-  const customerRows = validCustomers.map(customer => {
-    const row = [];
-    if (selectedFields.name) row.push(customer.customerName);
-    if (selectedFields.mobile) row.push(customer.customerMobile);
-    if (selectedFields.address) row.push(customer.customerAddress);
-    if (selectedFields.purchaseAmount) row.push(customer.totalPurchaseAmount);
-    if (selectedFields.purchaseItems) row.push(formatPurchaseItems(customer.transactions));
-    return row;
-  });
-  
-  const customerData = [customerHeaders, ...customerRows];
-  const customerSheet = XLSX.utils.aoa_to_sheet(customerData);
-  
-  // Dynamic column widths based on selected fields
-  const columnWidths = [];
-  if (selectedFields.name) columnWidths.push({ wch: 25 });
-  if (selectedFields.mobile) columnWidths.push({ wch: 15 });
-  if (selectedFields.address) columnWidths.push({ wch: 30 });
-  if (selectedFields.purchaseAmount) columnWidths.push({ wch: 20 });
-  if (selectedFields.purchaseItems) columnWidths.push({ wch: 50 }); // Wider for item details
-  
-  customerSheet['!cols'] = columnWidths;
-  
-  XLSX.utils.book_append_sheet(workbook, customerSheet, 'Customer Report');
-  
-  // Save the Excel file
-  XLSX.writeFile(workbook, filename);
-};
+  // ── Customer Excel ────────────────────────────────────────────────────
+  const generateCustomerExcelReport = async (reportData, filename, selectedFields) => {
+    const XLSX = window.XLSX;
+    const workbook = XLSX.utils.book_new();
+    const customerHeaders = [];
+    if (selectedFields.name) customerHeaders.push('Customer Name');
+    if (selectedFields.mobile) customerHeaders.push('Mobile Number');
+    if (selectedFields.address) customerHeaders.push('Address');
+    if (selectedFields.purchaseAmount) customerHeaders.push('Total Purchase Amount (₹)');
+    if (selectedFields.purchaseItems) customerHeaders.push('Purchase Items Details');
 
-// Customer CSV Generation Function - Updated with purchase items
-const generateCustomerCSVReport = (reportData, filename, selectedFields) => {
-  // Build dynamic headers based on selected fields
-  const headers = [];
-  if (selectedFields.name) headers.push('Customer Name');
-  if (selectedFields.mobile) headers.push('Mobile Number');
-  if (selectedFields.address) headers.push('Address');
-  if (selectedFields.purchaseAmount) headers.push('Total Purchase Amount (₹)');
-  if (selectedFields.purchaseItems) headers.push('Purchase Items Details');
-  
-  let csvContent = headers.join(',') + '\n';
-  
-  if (reportData.customers && reportData.customers.length > 0) {
-    // Filter customers who have ALL selected fields with valid data (AND operation)
     const validCustomers = reportData.customers.filter(customer => {
-      let hasAllSelectedFields = true;
-      
-      if (selectedFields.name && !isValidValue(customer.customerName)) {
-        hasAllSelectedFields = false;
-      }
-      
-      if (selectedFields.mobile && !isValidValue(customer.customerMobile)) {
-        hasAllSelectedFields = false;
-      }
-      
-      if (selectedFields.address && !isValidValue(customer.customerAddress)) {
-        hasAllSelectedFields = false;
-      }
-      
-      if (selectedFields.purchaseAmount && (!isValidValue(customer.totalPurchaseAmount) || customer.totalPurchaseAmount <= 0)) {
-        hasAllSelectedFields = false;
-      }
-      
-      if (selectedFields.purchaseItems && (!customer.transactions || customer.transactions.length === 0)) {
-        hasAllSelectedFields = false;
-      }
-      
-      return hasAllSelectedFields;
+      if (selectedFields.name && !isValidValue(customer.customerName)) return false;
+      if (selectedFields.mobile && !isValidValue(customer.customerMobile)) return false;
+      if (selectedFields.address && !isValidValue(customer.customerAddress)) return false;
+      if (selectedFields.purchaseAmount && (!isValidValue(customer.totalPurchaseAmount) || customer.totalPurchaseAmount <= 0)) return false;
+      if (selectedFields.purchaseItems && (!customer.transactions || customer.transactions.length === 0)) return false;
+      return true;
     });
-    
-    validCustomers.forEach(customer => {
+
+    const customerRows = validCustomers.map(customer => {
       const row = [];
-      if (selectedFields.name) row.push(`"${customer.customerName}"`);
-      if (selectedFields.mobile) row.push(`"${customer.customerMobile}"`);
-      if (selectedFields.address) row.push(`"${customer.customerAddress}"`);
+      if (selectedFields.name) row.push(customer.customerName);
+      if (selectedFields.mobile) row.push(customer.customerMobile);
+      if (selectedFields.address) row.push(customer.customerAddress);
       if (selectedFields.purchaseAmount) row.push(customer.totalPurchaseAmount);
-      if (selectedFields.purchaseItems) row.push(`"${formatPurchaseItems(customer.transactions)}"`);
-      
-      csvContent += row.join(',') + '\n';
+      if (selectedFields.purchaseItems) row.push(formatPurchaseItems(customer.transactions));
+      return row;
     });
-  }
-  
-  // Create and download CSV
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const link = document.createElement('a');
-  const url = URL.createObjectURL(blob);
-  link.setAttribute('href', url);
-  link.setAttribute('download', filename.replace('.xlsx', '.csv'));
-  link.style.visibility = 'hidden';
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-};
 
+    const customerSheet = XLSX.utils.aoa_to_sheet([customerHeaders, ...customerRows]);
+    const columnWidths = [];
+    if (selectedFields.name) columnWidths.push({ wch: 25 });
+    if (selectedFields.mobile) columnWidths.push({ wch: 15 });
+    if (selectedFields.address) columnWidths.push({ wch: 30 });
+    if (selectedFields.purchaseAmount) columnWidths.push({ wch: 20 });
+    if (selectedFields.purchaseItems) columnWidths.push({ wch: 50 });
+    customerSheet['!cols'] = columnWidths;
+    XLSX.utils.book_append_sheet(workbook, customerSheet, 'Customer Report');
+    await saveWorkbook(workbook, filename);
+  };
 
+  // ── Customer CSV ──────────────────────────────────────────────────────
+  const generateCustomerCSVReport = async (reportData, filename, selectedFields) => {
+    const headers = [];
+    if (selectedFields.name) headers.push('Customer Name');
+    if (selectedFields.mobile) headers.push('Mobile Number');
+    if (selectedFields.address) headers.push('Address');
+    if (selectedFields.purchaseAmount) headers.push('Total Purchase Amount (₹)');
+    if (selectedFields.purchaseItems) headers.push('Purchase Items Details');
 
-// Initialize data on component mount  
-useEffect(() => {
-  fetchStockData();
-  fetchSalesData();
-  fetchCustomersData();
-}, []);
+    let csvContent = headers.join(',') + '\n';
 
+    if (reportData.customers && reportData.customers.length > 0) {
+      reportData.customers.filter(customer => {
+        if (selectedFields.name && !isValidValue(customer.customerName)) return false;
+        if (selectedFields.mobile && !isValidValue(customer.customerMobile)) return false;
+        if (selectedFields.address && !isValidValue(customer.customerAddress)) return false;
+        if (selectedFields.purchaseAmount && (!isValidValue(customer.totalPurchaseAmount) || customer.totalPurchaseAmount <= 0)) return false;
+        if (selectedFields.purchaseItems && (!customer.transactions || customer.transactions.length === 0)) return false;
+        return true;
+      }).forEach(customer => {
+        const row = [];
+        if (selectedFields.name) row.push(`"${customer.customerName}"`);
+        if (selectedFields.mobile) row.push(`"${customer.customerMobile}"`);
+        if (selectedFields.address) row.push(`"${customer.customerAddress}"`);
+        if (selectedFields.purchaseAmount) row.push(customer.totalPurchaseAmount);
+        if (selectedFields.purchaseItems) row.push(`"${formatPurchaseItems(customer.transactions)}"`);
+        csvContent += row.join(',') + '\n';
+      });
+    }
 
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    await downloadFile(blob, filename.replace('.xlsx', '.csv'));
+  };
 
-  // Refetch customer data when field selection changes
-  useEffect(() => {
-    fetchCustomersData();
-  }, [customerFields]);
+  // ── Lifecycle ─────────────────────────────────────────────────────────
+  useEffect(() => { fetchStockData(); fetchSalesData(); fetchCustomersData(); }, []);
+  useEffect(() => { fetchCustomersData(); }, [customerFields]);
 
   const LoadingSpinner = () => (
     <div className="flex items-center justify-center p-8">
@@ -3668,4 +2459,5 @@ return (
 
 
 };
+
 export default ReportPage;
