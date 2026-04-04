@@ -6,18 +6,15 @@ import { LogOut, Menu, X, Lock, Sun, Moon, ShieldCheck } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import ResetPasswordModal from "./ResetPasswordModal";
 import SubscriptionBadge from "./SubscriptionBadge";
-
 export default function Layout() {
   const { logout, user } = useAuth();
   const { t } = useTranslation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showResetPasswordModal, setShowResetPasswordModal] = useState(false);
-
   const [darkMode, setDarkMode] = useState(() => {
     const saved = localStorage.getItem("darkMode");
     return saved ? JSON.parse(saved) : false;
   });
-
   useEffect(() => {
     if (darkMode) {
       document.documentElement.classList.add("dark");
@@ -26,7 +23,6 @@ export default function Layout() {
     }
     localStorage.setItem("darkMode", JSON.stringify(darkMode));
   }, [darkMode]);
-
   const navItems = user?.isAdmin
     ? [
         { name: "Admin Panel", path: "/admin" }
@@ -37,15 +33,12 @@ export default function Layout() {
         { name: t("Stock Entries"), path: "/entries" },
         { name: t("Reports"), path: "/reports" }
       ];
-
   const handleResetPassword = () => {
     setShowResetPasswordModal(true);
     setSidebarOpen(false);
   };
-
   return (
-    <div className="min-h-screen flex flex-col md:flex-row bg-gray-50 dark:bg-gray-900">
-
+    <div className="h-screen overflow-hidden flex flex-col md:flex-row bg-gray-50 dark:bg-gray-900">
       {/* Mobile Menu Button */}
       <button
         onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -64,7 +57,6 @@ export default function Layout() {
           {sidebarOpen ? t("Close Menu") : t("Open Menu")}
         </span>
       </button>
-
       {/* Sidebar */}
       <aside
         className={`
@@ -76,7 +68,7 @@ export default function Layout() {
           flex flex-col justify-between
         `}
         style={{
-          height: "100dvh",
+          height: "100%",
           paddingTop: "calc(env(safe-area-inset-top) + 72px)",
           paddingBottom: "calc(env(safe-area-inset-bottom) + 16px)",
           paddingLeft: "0",
@@ -84,7 +76,7 @@ export default function Layout() {
         }}
       >
         {/* Top section: Logo + Nav */}
-        <div className="flex flex-col gap-4 min-h-0 overflow-y-auto px-5">
+        <div className="flex flex-col gap-4 min-h-0 px-5">
           {/* Logo */}
           <div className="text-center">
             <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-blue-700 bg-clip-text text-transparent">
@@ -98,7 +90,6 @@ export default function Layout() {
             )}
             <div className="w-12 h-1 bg-gradient-to-r from-blue-600 to-blue-700 mx-auto mt-1.5 rounded-full" />
           </div>
-
           {/* Nav links */}
           <nav className="flex flex-col gap-2">
             {navItems.map((item) => (
@@ -119,15 +110,12 @@ export default function Layout() {
             ))}
           </nav>
         </div>
-
         {/* Bottom section */}
         <div className="flex flex-col gap-2 pt-3">
-
           {/* Subscription badge — only for non-admin users */}
           {!user?.isAdmin && user?.subscription && (
             <SubscriptionBadge subscription={user.subscription} />
           )}
-
           <div className="px-5 flex flex-col gap-2 border-t border-gray-200/50 dark:border-gray-700/50 pt-3">
             <button
               onClick={() => setDarkMode(!darkMode)}
@@ -136,7 +124,6 @@ export default function Layout() {
               {darkMode ? <Sun size={18} /> : <Moon size={18} />}
               {darkMode ? "Light Mode" : "Dark Mode"}
             </button>
-
             <button
               onClick={handleResetPassword}
               className="w-full flex items-center justify-center gap-2 px-5 py-3 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white text-sm font-medium rounded-xl shadow-md hover:shadow-lg transition-all duration-200"
@@ -144,7 +131,6 @@ export default function Layout() {
               <Lock size={18} />
               {t("Reset Password") || "Reset Password"}
             </button>
-
             <button
               onClick={logout}
               className="w-full flex items-center justify-center gap-2 px-5 py-3 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white text-sm font-medium rounded-xl shadow-md hover:shadow-lg transition-all duration-200"
@@ -155,7 +141,6 @@ export default function Layout() {
           </div>
         </div>
       </aside>
-
       {/* Backdrop */}
       {sidebarOpen && (
         <div
@@ -163,10 +148,9 @@ export default function Layout() {
           onClick={() => setSidebarOpen(false)}
         />
       )}
-
       {/* Main Content */}
       <main
-        className="flex-1 p-4 md:p-8 max-w-full"
+        className="flex-1 p-4 md:p-8 max-w-full overflow-y-auto"
         style={{
           marginTop: "calc(env(safe-area-inset-top) + 56px)",
           paddingBottom: "calc(env(safe-area-inset-bottom) + 16px)"
@@ -181,7 +165,6 @@ export default function Layout() {
           </div>
         </div>
       </main>
-
       {showResetPasswordModal && (
         <ResetPasswordModal onClose={() => setShowResetPasswordModal(false)} />
       )}
