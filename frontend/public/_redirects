@@ -1,2 +1,3 @@
-/api/*  https://jewellery-stock-management.up.railway.app/api/:splat  200
-/*      /index.html                                          200
+/hidden-api/*  https://jewellery-stock-management.up.railway.app/:splat  200
+/api/*         https://jewellery-stock-management.up.railway.app/api/:splat  200
+/*             /index.html                                                   200
