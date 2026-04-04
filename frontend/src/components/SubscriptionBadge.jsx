@@ -72,46 +72,30 @@ export default function SubscriptionBadge({ subscription }) {
     ? new Date(endDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
     : null;
 
-  return (
-    <div className={`mx-3 mb-2 rounded-xl border-2 ${config.border} ${config.bg} p-3 space-y-2`}>
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5">
-          <Icon size={13} className={config.text} />
-          <span className={`text-xs font-bold uppercase tracking-wide ${config.text}`}>
-            Subscription
-          </span>
+    return (
+      <div className={`mx-3 mb-2 rounded-lg border ${config.border} ${config.bg} px-3 py-1.5`}>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <Icon size={12} className={`${config.text} flex-shrink-0`} />
+            <span className={`text-xs font-bold uppercase tracking-wide ${config.text} truncate`}>
+              Subscription
+            </span>
+          </div>
+          <div className="flex items-center gap-1 flex-shrink-0">
+            <span className={`text-sm font-black ${config.text} tabular-nums`}>
+              {daysRemaining}
+            </span>
+            <span className={`text-xs ${config.subtext}`}>
+              day{daysRemaining !== 1 ? "s" : ""}
+            </span>
+          </div>
         </div>
-        <span className={`text-xs font-semibold ${config.text}`}>
-          {config.label}
-        </span>
+        {formattedEnd && (
+          <div className={`flex items-center gap-1 text-xs ${config.subtext} mt-0.5`}>
+            <Calendar size={9} />
+            <span>Expires {formattedEnd}</span>
+          </div>
+        )}
       </div>
-
-      {/* Days remaining */}
-      <div className="text-center">
-        <span className={`text-2xl font-black ${config.text} tabular-nums`}>
-          {daysRemaining}
-        </span>
-        <span className={`text-xs font-medium ${config.subtext} ml-1`}>
-          day{daysRemaining !== 1 ? "s" : ""} left
-        </span>
-      </div>
-
-      {/* Progress bar */}
-      <div className="h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-        <div
-          className={`h-full bg-gradient-to-r ${config.bar} rounded-full transition-all duration-700`}
-          style={{ width: `${progressPct}%` }}
-        />
-      </div>
-
-      {/* End date */}
-      {formattedEnd && (
-        <div className={`flex items-center gap-1 text-xs ${config.subtext}`}>
-          <Calendar size={10} />
-          <span>Expires {formattedEnd}</span>
-        </div>
-      )}
-    </div>
-  );
+    );
 }
