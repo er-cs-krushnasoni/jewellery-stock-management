@@ -84,8 +84,7 @@ export default function Layout() {
         }}
       >
         {/* Top section: Logo + Nav */}
-        <div className="flex flex-col gap-4 min-h-0 px-5">
-
+        <div className="flex flex-col gap-4 min-h-0 overflow-y-auto px-5">
           {/* Logo */}
           <div className="text-center">
             <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-blue-700 bg-clip-text text-transparent">
