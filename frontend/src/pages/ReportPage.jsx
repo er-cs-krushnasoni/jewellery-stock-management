@@ -1,28 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import BackButton from '../components/ui/BackButton';  
+import BackButton from '../components/ui/BackButton';
 import { Card } from '../components/ui/card';
 import { Button } from "../components/ui/button";
 import { Input } from '../components/ui/input';
 import { Modal } from '../components/ui/modal';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, LineChart,Line,XAxis, YAxis, CartesianGrid,} from 'recharts';
-import api from '../config/api'; 
-import { 
-  Calendar, 
-  Download, 
-  TrendingUp, 
-  Users, 
-  Package, 
-  FileText,
-  Filter,
-  CheckCircle,
-  AlertCircle,
-  Loader2,
-  PieChart as PieChartIcon, 
-  BarChart3 
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, LineChart, Line, XAxis, YAxis, CartesianGrid } from 'recharts';
+import api from '../config/api';
+import {
+  Calendar, Download, TrendingUp, Users, Package, FileText,
+  Filter, CheckCircle, AlertCircle, Loader2, PieChart as PieChartIcon, BarChart3
 } from 'lucide-react';
 
-// Convert DD/MM/YYYY to ISO date (YYYY-MM-DD) for API
+// ── Date helpers ──────────────────────────────────────────────────────────
 const formatDateForAPI = (displayDate) => {
   if (!displayDate) return '';
   if (displayDate.includes('-') && displayDate.length === 10) return displayDate;
@@ -30,7 +20,6 @@ const formatDateForAPI = (displayDate) => {
   return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
 };
 
-// Format date object to DD/MM/YYYY
 const formatDateObjectForDisplay = (dateObj) => {
   if (!dateObj) return '';
   const day = dateObj.getDate().toString().padStart(2, '0');
@@ -39,7 +28,6 @@ const formatDateObjectForDisplay = (dateObj) => {
   return `${day}/${month}/${year}`;
 };
 
-// Convert ISO date (YYYY-MM-DD) to DD/MM/YYYY for display
 const formatDateForDisplay = (isoDate) => {
   if (!isoDate) return '';
   if (isoDate.includes('/') && isoDate.length === 10) return isoDate;
@@ -47,7 +35,6 @@ const formatDateForDisplay = (isoDate) => {
   return `${day}/${month}/${year}`;
 };
 
-// Format date from API response for display
 const formatAPIDateForDisplay = (dateString) => {
   if (!dateString) return '';
   const date = new Date(dateString);
@@ -55,22 +42,36 @@ const formatAPIDateForDisplay = (dateString) => {
   return formatDateObjectForDisplay(date);
 };
 
-// ── Universal download helper ─────────────────────────────────────────────
-// Works in browser, Capacitor Android, and Electron
-const downloadFile = async (blob, filename) => {
-  const isCapacitorApp =
-    typeof window !== 'undefined' &&
-    typeof window.Capacitor !== 'undefined' &&
-    window.Capacitor.isNativePlatform?.();
+// ── Platform helpers ──────────────────────────────────────────────────────
+const isCapacitorApp = () =>
+  typeof window !== 'undefined' &&
+  typeof window.Capacitor !== 'undefined' &&
+  window.Capacitor.isNativePlatform?.();
 
-  if (isCapacitorApp && navigator.share) {
+const isInIframe = () => {
+  try { return window.self !== window.top; } catch (e) { return true; }
+};
+
+// ── Universal download helper ─────────────────────────────────────────────
+// In Capacitor iframe: sends file to parent via postMessage
+// In browser / Electron: uses normal blob download
+const downloadFile = async (blob, filename) => {
+  if (isCapacitorApp() && isInIframe()) {
     try {
-      const file = new File([blob], filename, { type: blob.type });
-      await navigator.share({ files: [file], title: filename });
+      const arrayBuffer = await blob.arrayBuffer();
+      const uint8Array = new Uint8Array(arrayBuffer);
+      const array = Array.from(uint8Array);
+      window.parent.postMessage({
+        type: 'DOWNLOAD_FILE',
+        filename,
+        mimeType: blob.type,
+        data: array
+      }, '*');
+      // Give parent time to handle before alert
+      await new Promise(resolve => setTimeout(resolve, 300));
       return;
     } catch (err) {
-      if (err.name === 'AbortError') return; // user cancelled
-      // fall through to normal download
+      console.error('postMessage download failed:', err);
     }
   }
 
@@ -85,14 +86,9 @@ const downloadFile = async (blob, filename) => {
   window.URL.revokeObjectURL(url);
 };
 
-// ── Helper: save jsPDF doc (handles Capacitor) ────────────────────────────
+// ── Save jsPDF doc ────────────────────────────────────────────────────────
 const saveDoc = async (doc, filename) => {
-  const isCapacitorApp =
-    typeof window !== 'undefined' &&
-    typeof window.Capacitor !== 'undefined' &&
-    window.Capacitor.isNativePlatform?.();
-
-  if (isCapacitorApp && navigator.share) {
+  if (isCapacitorApp() && isInIframe()) {
     const pdfBlob = doc.output('blob');
     await downloadFile(pdfBlob, filename);
   } else {
@@ -100,14 +96,9 @@ const saveDoc = async (doc, filename) => {
   }
 };
 
-// ── Helper: save XLSX workbook (handles Capacitor) ────────────────────────
+// ── Save XLSX workbook ────────────────────────────────────────────────────
 const saveWorkbook = async (wb, filename) => {
-  const isCapacitorApp =
-    typeof window !== 'undefined' &&
-    typeof window.Capacitor !== 'undefined' &&
-    window.Capacitor.isNativePlatform?.();
-
-  if (isCapacitorApp && navigator.share) {
+  if (isCapacitorApp() && isInIframe()) {
     const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
     const blob = new Blob([wbout], { type: 'application/octet-stream' });
     await downloadFile(blob, filename);
@@ -118,23 +109,23 @@ const saveWorkbook = async (wb, filename) => {
 
 const ReportPage = () => {
   const { user } = useAuth();
-  
+
   const [stockData, setStockData] = useState(null);
   const [salesData, setSalesData] = useState(null);
   const [customersData, setCustomersData] = useState(null);
   const [jsPDFLoaded, setJsPDFLoaded] = useState(false);
   const [loading, setLoading] = useState({ stock: false, sales: false, customers: false });
-  
+
   const [customerFields, setCustomerFields] = useState({
     name: true, address: true, mobile: true,
     purchaseAmount: true, purchaseItems: false
   });
-  
+
   const [downloadModal, setDownloadModal] = useState({ open: false, type: '', data: null });
   const [categoryData, setCategoryData] = useState({ gold: [], silver: [] });
   const [includeEntries, setIncludeEntries] = useState(false);
   const [error, setError] = useState('');
-  
+
   const COLORS = [
     '#8884d8', '#82ca9d', '#ffc658', '#ff7300', '#00ff00',
     '#0088fe', '#00c49f', '#ffbb28', '#ff8042', '#8dd1e1'
@@ -156,13 +147,11 @@ const ReportPage = () => {
   // ── Load jsPDF ────────────────────────────────────────────────────────
   const loadJsPDF = () => {
     return new Promise((resolve, reject) => {
-      const existingJsPDF = window.jsPDF || window.jspdf ||
-        (window.jsPDF && window.jsPDF.jsPDF) ||
-        (window.jspdf && window.jspdf.jsPDF);
-      if (existingJsPDF) { setJsPDFLoaded(true); resolve(); return; }
+      const existing = window.jsPDF || window.jspdf ||
+        (window.jsPDF && window.jsPDF.jsPDF) || (window.jspdf && window.jspdf.jsPDF);
+      if (existing) { setJsPDFLoaded(true); resolve(); return; }
 
-      const existingScripts = document.querySelectorAll('script[src*="jspdf"]');
-      existingScripts.forEach(script => script.remove());
+      document.querySelectorAll('script[src*="jspdf"]').forEach(s => s.remove());
 
       const script = document.createElement('script');
       script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
@@ -171,31 +160,29 @@ const ReportPage = () => {
 
       script.onload = () => {
         setTimeout(() => {
-          const jsPDFConstructor = window.jsPDF || window.jspdf ||
+          const c = window.jsPDF || window.jspdf ||
             (window.jsPDF && window.jsPDF.jsPDF) || (window.jspdf && window.jspdf.jsPDF);
-          if (jsPDFConstructor) { setJsPDFLoaded(true); resolve(); }
+          if (c) { setJsPDFLoaded(true); resolve(); }
           else reject(new Error('jsPDF failed to load properly'));
         }, 500);
       };
 
       script.onerror = () => {
-        const altScript = document.createElement('script');
-        altScript.src = 'https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js';
-        altScript.async = true;
-        altScript.crossOrigin = 'anonymous';
-        altScript.onload = () => {
+        const alt = document.createElement('script');
+        alt.src = 'https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js';
+        alt.async = true; alt.crossOrigin = 'anonymous';
+        alt.onload = () => {
           setTimeout(() => {
-            const jsPDFConstructor = window.jsPDF || window.jspdf ||
+            const c = window.jsPDF || window.jspdf ||
               (window.jsPDF && window.jsPDF.jsPDF) || (window.jspdf && window.jspdf.jsPDF);
-            if (jsPDFConstructor) { setJsPDFLoaded(true); resolve(); }
-            else reject(new Error('jsPDF failed to load from both CDNs'));
+            if (c) { setJsPDFLoaded(true); resolve(); }
+            else reject(new Error('jsPDF failed from both CDNs'));
           }, 500);
         };
-        altScript.onerror = () => reject(new Error('Failed to load jsPDF from both CDNs'));
+        alt.onerror = () => reject(new Error('Failed to load jsPDF from both CDNs'));
         script.remove();
-        document.head.appendChild(altScript);
+        document.head.appendChild(alt);
       };
-
       document.head.appendChild(script);
     });
   };
@@ -207,37 +194,16 @@ const ReportPage = () => {
     });
   }, []);
 
-  // ── Process stock data for charts ─────────────────────────────────────
-  const processStockDataForCharts = (stockData) => {
-    const goldCategories = [];
-    const silverCategories = [];
-    if (stockData.gold && stockData.gold.categories) {
-      Object.entries(stockData.gold.categories).forEach(([categoryName, categoryData]) => {
-        const pureWeight = parseFloat(categoryData.pureWeight) || 0;
-        if (pureWeight > 0) goldCategories.push({ name: categoryName, value: pureWeight });
-      });
-    }
-    if (stockData.silver && stockData.silver.categories) {
-      Object.entries(stockData.silver.categories).forEach(([categoryName, categoryData]) => {
-        const pureWeight = parseFloat(categoryData.pureWeight) || 0;
-        if (pureWeight > 0) silverCategories.push({ name: categoryName, value: pureWeight });
-      });
-    }
-    return { gold: goldCategories, silver: silverCategories };
-  };
-
   // ── Fetch stock data ──────────────────────────────────────────────────
-  const fetchStockData = async (metalType = null) => {
+  const fetchStockData = async () => {
     setLoading(prev => ({ ...prev, stock: true }));
     try {
       const token = localStorage.getItem('token');
       if (!token) throw new Error('No authentication token found');
-
       const metadataResponse = await api.get('/api/metadata', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const metadataData = metadataResponse.data;
-
       const processedData = {
         gold: {
           totalGross: metadataData.totalGoldGross || 0,
@@ -254,14 +220,12 @@ const ReportPage = () => {
           categories: {}
         }
       };
-
       const goldCategories = [];
       const silverCategories = [];
-
       if (metadataData.categoryTotals) {
         Object.entries(metadataData.categoryTotals).forEach(([categoryKey, categoryData]) => {
           const { pureWeight, metal, grossWeight, totalItems, categoryName, purities } = categoryData;
-          let averagePurity = grossWeight > 0 ? (pureWeight / grossWeight) * 100 : 0;
+          const averagePurity = grossWeight > 0 ? (pureWeight / grossWeight) * 100 : 0;
           const processedCategoryData = {
             grossWeight: grossWeight || 0, pureWeight: pureWeight || 0,
             totalItems: totalItems || 0, averagePurity: averagePurity.toFixed(2),
@@ -277,7 +241,6 @@ const ReportPage = () => {
           }
         });
       }
-
       setStockData(processedData);
       setCategoryData({ gold: goldCategories, silver: silverCategories });
     } catch (error) {
@@ -295,18 +258,16 @@ const ReportPage = () => {
     const day = String(date.getDate()).padStart(2, '0');
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const year = date.getFullYear();
-    const filenameSafeDate = `${day}-${month}-${year}`;
+    const d = `${day}-${month}-${year}`;
     switch (reportType) {
-      case 'stock-gold':     return `gold_inventory_${filenameSafeDate}.${extension}`;
-      case 'stock-silver':   return `silver_inventory_${filenameSafeDate}.${extension}`;
-      case 'stock-full':     return `full_inventory_${filenameSafeDate}.${extension}`;
-      case 'sales':          return `sales_report_${filenameSafeDate}.${extension}`;
-      case 'customers':      return `customer_list_${filenameSafeDate}.${extension}`;
-      default:               return `report_${filenameSafeDate}.${extension}`;
+      case 'stock-gold':   return `gold_inventory_${d}.${extension}`;
+      case 'stock-silver': return `silver_inventory_${d}.${extension}`;
+      case 'stock-full':   return `full_inventory_${d}.${extension}`;
+      case 'sales':        return `sales_report_${d}.${extension}`;
+      case 'customers':    return `customer_list_${d}.${extension}`;
+      default:             return `report_${d}.${extension}`;
     }
   };
-
-  const filename = getFilename('stock-gold', 'pdf', new Date());
 
   // ── Handle download ───────────────────────────────────────────────────
   const handleDownload = async (reportType, format) => {
@@ -317,7 +278,7 @@ const ReportPage = () => {
 
       const response = await api.post('/api/reports/download', {
         reportType, format,
-        includeEntries: includeEntries,
+        includeEntries,
         ...(reportType.startsWith('stock-') && { metalType: reportType.split('-')[1] }),
         ...(reportType === 'sales' && { startDate: dateRange.startDate, endDate: dateRange.endDate }),
         ...(reportType === 'customers' && { fields: customerFields })
@@ -327,9 +288,8 @@ const ReportPage = () => {
       if (data.message && !data.downloadReady) throw new Error(data.message);
 
       if (data.downloadReady && data.downloadData) {
-        const currentTimestamp = new Date().getTime();
-        let filename = getFilename(reportType, format, currentTimestamp);
-        let reportData = data.downloadData.data;
+        const filename = getFilename(reportType, format, new Date().getTime());
+        const reportData = data.downloadData.data;
 
         if (reportType === 'sales') {
           if (format === 'pdf') await generateSalesPDFReport(reportData, filename);
@@ -343,7 +303,11 @@ const ReportPage = () => {
         }
 
         setDownloadModal({ open: false, type: '', data: null });
-        alert(`${format.toUpperCase()} report downloaded successfully!`);
+
+        // Only show alert on non-Capacitor — on Capacitor the share sheet is the confirmation
+        if (!isCapacitorApp()) {
+          alert(`${format.toUpperCase()} report downloaded successfully!`);
+        }
         return;
       }
     } catch (error) {
@@ -359,35 +323,27 @@ const ReportPage = () => {
   const generatePDFFromData = async (data, reportType, filename) => {
     try {
       if (!jsPDFLoaded) await loadJsPDF();
-
       let jsPDFConstructor = null;
       if (window.jsPDF) jsPDFConstructor = window.jsPDF.jsPDF || window.jsPDF;
       else if (window.jspdf) jsPDFConstructor = window.jspdf.jsPDF || window.jspdf;
       if (!jsPDFConstructor && typeof jsPDF !== 'undefined') jsPDFConstructor = jsPDF;
-
       if (!jsPDFConstructor || typeof jsPDFConstructor !== 'function') {
-        throw new Error('PDF library could not be loaded. Please check your internet connection and try again.');
+        throw new Error('PDF library could not be loaded.');
       }
-
       const doc = new jsPDFConstructor();
       const pageWidth = doc.internal.pageSize.width;
       const pageHeight = doc.internal.pageSize.height;
       const margin = 20;
       let yPosition = margin;
 
-      const checkNewPage = (linesNeeded = 1) => {
-        if (yPosition + (linesNeeded * 6) > pageHeight - margin) {
-          doc.addPage(); yPosition = margin; return true;
-        }
-        return false;
+      const checkNewPage = () => {
+        if (yPosition + 6 > pageHeight - margin) { doc.addPage(); yPosition = margin; }
       };
-
       const addText = (text, fontSize = 10, isBold = false, align = 'left') => {
         checkNewPage();
         doc.setFontSize(fontSize);
         doc.setFont('helvetica', isBold ? 'bold' : 'normal');
-        const maxWidth = pageWidth - (margin * 2);
-        const splitText = doc.splitTextToSize(text.toString(), maxWidth);
+        const splitText = doc.splitTextToSize(text.toString(), pageWidth - margin * 2);
         let xPosition = margin;
         if (align === 'center') xPosition = pageWidth / 2;
         else if (align === 'right') xPosition = pageWidth - margin;
@@ -402,10 +358,6 @@ const ReportPage = () => {
       switch (reportType) {
         case 'stock-gold': case 'stock-silver': case 'stock-full':
           generateStockPDF(doc, data, reportType, addText, checkNewPage); break;
-        case 'sales':
-          generateSalesPDF(doc, data, addText, checkNewPage); break;
-        case 'customers':
-          generateCustomerPDF(doc, data, addText, checkNewPage); break;
         default:
           addText('Data: ' + JSON.stringify(data, null, 2));
       }
@@ -413,16 +365,11 @@ const ReportPage = () => {
       await saveDoc(doc, filename);
     } catch (error) {
       console.error('PDF generation error:', error);
-      if (error.message.includes('PDF library')) {
-        alert('PDF library is not available. Please refresh the page and try again, or download as Excel instead.');
-      } else {
-        alert('PDF generation failed. Please try downloading as Excel format instead.');
-        throw error;
-      }
+      alert('PDF generation failed. Please try downloading as Excel format instead.');
+      throw error;
     }
   };
 
-  // ── Report title helper ───────────────────────────────────────────────
   const getReportTitle = (reportType) => {
     switch (reportType) {
       case 'stock-gold':   return 'GOLD INVENTORY REPORT';
@@ -434,93 +381,55 @@ const ReportPage = () => {
     }
   };
 
-  // ── Generate stock PDF ────────────────────────────────────────────────
+  // ── Stock PDF ─────────────────────────────────────────────────────────
   const generateStockPDF = (doc, data, reportType, addText, checkNewPage) => {
-    const formatDate = (dateString) => {
-      if (!dateString) return 'N/A';
-      const date = new Date(dateString);
-      return `${String(date.getDate()).padStart(2,'0')}/${String(date.getMonth()+1).padStart(2,'0')}/${date.getFullYear()}`;
-    };
-
     const formatPurity = (purity) => {
       if (!purity || purity === 0) return '0.00';
-      const purityStr = purity.toString();
-      const dotIndex = purityStr.indexOf('.');
-      return dotIndex === -1 ? purityStr + '.00' : purityStr.substring(0, dotIndex + 3).padEnd(dotIndex + 3, '0');
+      const s = purity.toString(); const dot = s.indexOf('.');
+      return dot === -1 ? s + '.00' : s.substring(0, dot + 3).padEnd(dot + 3, '0');
     };
-
     const addPurityBreakdown = (purities, indent = '    ') => {
-      if (!purities || Object.keys(purities).length === 0) {
-        addText(`${indent}No purity data available`, 9); return;
-      }
+      if (!purities || Object.keys(purities).length === 0) { addText(`${indent}No purity data available`, 9); return; }
       addText(`${indent}Purity Breakdown:`, 10, true);
-      Object.entries(purities).forEach(([purity, purityData]) => {
-        if (purityData.totalItems > 0) {
+      Object.entries(purities).forEach(([purity, pd]) => {
+        if (pd.totalItems > 0) {
           addText(`${indent}• ${purity}%:`, 9, true);
-          addText(`${indent}  - Gross Weight: ${purityData.grossWeight || 0}g`, 9);
-          addText(`${indent}  - Pure Weight: ${purityData.pureWeight || 0}g`, 9);
-          addText(`${indent}  - Items: ${purityData.totalItems || 0}`, 9);
+          addText(`${indent}  - Gross Weight: ${pd.grossWeight || 0}g`, 9);
+          addText(`${indent}  - Pure Weight: ${pd.pureWeight || 0}g`, 9);
+          addText(`${indent}  - Items: ${pd.totalItems || 0}`, 9);
         }
       });
     };
 
     if (reportType === 'stock-full') {
-      if (data.totalGoldGross > 0 || (data.categories && Object.keys(data.categories).filter(k => k.includes('_gold')).length > 0)) {
+      const goldCats = Object.entries(data.categories || {}).filter(([k]) => k.includes('_gold'));
+      const silverCats = Object.entries(data.categories || {}).filter(([k]) => k.includes('_silver'));
+      if (data.totalGoldGross > 0 || goldCats.length > 0) {
         addText('GOLD INVENTORY SUMMARY', 14, true);
         addText(`Total Gross Weight: ${data.totalGoldGross || 0} g`, 11);
         addText(`Total Pure Weight: ${data.totalGoldPure || 0} g`, 11);
         addText(`Average Purity: ${data.goldAveragePurity || 0}%`, 11);
         addText('', 8);
         addText('GOLD CATEGORY BREAKDOWN:', 12, true);
-        const goldCategories = Object.entries(data.categories || {}).filter(([key]) => key.includes('_gold'));
-        if (goldCategories.length > 0) {
-          goldCategories.forEach(([category, categoryData]) => {
-            addText(`• ${category}:`, 10, true);
-            addText(`  - Gross Weight: ${categoryData.grossWeight || 0}g`, 10);
-            addText(`  - Pure Weight: ${categoryData.pureWeight || 0}g`, 10);
-            addText(`  - Average Purity: ${formatPurity(categoryData.averagePurity)}%`, 10);
-            addText(`  - Total Items: ${categoryData.totalItems || 0}`, 10);
-            addPurityBreakdown(categoryData.purities, '    ');
-            addText('', 6);
-          });
-          addText('GOLD CATEGORY DISTRIBUTION (By Pure Weight):', 12, true);
-          const totalPureWeight = data.totalGoldPure || 0;
-          goldCategories.forEach(([category, categoryData]) => {
-            if (categoryData.pureWeight > 0) {
-              const percentage = totalPureWeight > 0 ? Math.floor((categoryData.pureWeight / totalPureWeight) * 10000) / 100 : 0;
-              addText(`• ${category}: ${categoryData.pureWeight}g (${percentage}%)`, 10);
-            }
-          });
-        } else { addText('No gold category data available', 10); }
+        goldCats.forEach(([cat, cd]) => {
+          addText(`• ${cat}:`, 10, true);
+          addText(`  - Gross: ${cd.grossWeight || 0}g  Pure: ${cd.pureWeight || 0}g  Purity: ${formatPurity(cd.averagePurity)}%  Items: ${cd.totalItems || 0}`, 10);
+          addPurityBreakdown(cd.purities); addText('', 6);
+        });
         addText('', 8);
       }
-      if (data.totalSilverGross > 0 || (data.categories && Object.keys(data.categories).filter(k => k.includes('_silver')).length > 0)) {
+      if (data.totalSilverGross > 0 || silverCats.length > 0) {
         addText('SILVER INVENTORY SUMMARY', 14, true);
         addText(`Total Gross Weight: ${data.totalSilverGross || 0} g`, 11);
         addText(`Total Pure Weight: ${data.totalSilverPure || 0} g`, 11);
         addText(`Average Purity: ${data.silverAveragePurity || 0}%`, 11);
         addText('', 8);
         addText('SILVER CATEGORY BREAKDOWN:', 12, true);
-        const silverCategories = Object.entries(data.categories || {}).filter(([key]) => key.includes('_silver'));
-        if (silverCategories.length > 0) {
-          silverCategories.forEach(([category, categoryData]) => {
-            addText(`• ${category}:`, 10, true);
-            addText(`  - Gross Weight: ${categoryData.grossWeight || 0}g`, 10);
-            addText(`  - Pure Weight: ${categoryData.pureWeight || 0}g`, 10);
-            addText(`  - Average Purity: ${formatPurity(categoryData.averagePurity)}%`, 10);
-            addText(`  - Total Items: ${categoryData.totalItems || 0}`, 10);
-            addPurityBreakdown(categoryData.purities, '    ');
-            addText('', 6);
-          });
-          addText('SILVER CATEGORY DISTRIBUTION (By Pure Weight):', 12, true);
-          const totalPureWeight = data.totalSilverPure || 0;
-          silverCategories.forEach(([category, categoryData]) => {
-            if (categoryData.pureWeight > 0) {
-              const percentage = totalPureWeight > 0 ? Math.floor((categoryData.pureWeight / totalPureWeight) * 10000) / 100 : 0;
-              addText(`• ${category}: ${categoryData.pureWeight}g (${percentage}%)`, 10);
-            }
-          });
-        } else { addText('No silver category data available', 10); }
+        silverCats.forEach(([cat, cd]) => {
+          addText(`• ${cat}:`, 10, true);
+          addText(`  - Gross: ${cd.grossWeight || 0}g  Pure: ${cd.pureWeight || 0}g  Purity: ${formatPurity(cd.averagePurity)}%  Items: ${cd.totalItems || 0}`, 10);
+          addPurityBreakdown(cd.purities); addText('', 6);
+        });
         addText('', 8);
       }
     } else {
@@ -532,86 +441,48 @@ const ReportPage = () => {
         addText(`Average Purity: ${data.averagePurity || 0}%`, 11);
         addText('', 8);
         addText(`${metalType} CATEGORY BREAKDOWN:`, 12, true);
-        Object.entries(data.categories).forEach(([category, categoryData]) => {
-          addText(`• ${category}:`, 10, true);
-          addText(`  - Gross Weight: ${categoryData.grossWeight || 0}g`, 10);
-          addText(`  - Pure Weight: ${categoryData.pureWeight || 0}g`, 10);
-          addText(`  - Average Purity: ${formatPurity(categoryData.averagePurity)}%`, 10);
-          addText(`  - Total Items: ${categoryData.totalItems || 0}`, 10);
-          addPurityBreakdown(categoryData.purities, '    ');
-          addText('', 6);
-        });
-        addText(`${metalType} CATEGORY DISTRIBUTION (By Pure Weight):`, 12, true);
-        const totalPureWeight = data.totalPure || 0;
-        Object.entries(data.categories).forEach(([category, categoryData]) => {
-          if (categoryData.pureWeight > 0) {
-            const percentage = totalPureWeight > 0 ? Math.floor((categoryData.pureWeight / totalPureWeight) * 10000) / 100 : 0;
-            addText(`• ${category}: ${categoryData.pureWeight}g (${percentage}%)`, 10);
-          }
+        Object.entries(data.categories).forEach(([cat, cd]) => {
+          addText(`• ${cat}:`, 10, true);
+          addText(`  - Gross: ${cd.grossWeight || 0}g  Pure: ${cd.pureWeight || 0}g  Purity: ${formatPurity(cd.averagePurity)}%  Items: ${cd.totalItems || 0}`, 10);
+          addPurityBreakdown(cd.purities); addText('', 6);
         });
       } else { addText(`No ${metalType.toLowerCase()} data available`, 10); }
     }
   };
 
-  // ── Generate Excel from data ──────────────────────────────────────────
+  // ── Excel from data ───────────────────────────────────────────────────
   const generateExcelFromData = async (data, reportType, filename) => {
     try {
-      if (reportType === 'stock-full') {
-        await generateMultiSheetExcel(data, filename); return;
-      }
+      if (reportType === 'stock-full') { await generateMultiSheetExcel(data, filename); return; }
       let csvContent = '';
       switch (reportType) {
-        case 'stock-gold': case 'stock-silver':
-          csvContent = formatStockDataForCSV(data, reportType); break;
-        case 'sales':      csvContent = formatSalesDataForCSV(data); break;
-        case 'customers':  csvContent = formatCustomerDataForCSV(data); break;
-        default:           csvContent = 'Data\n' + JSON.stringify(data, null, 2);
+        case 'stock-gold': case 'stock-silver': csvContent = formatStockDataForCSV(data, reportType); break;
+        case 'sales': csvContent = formatSalesDataForCSV(data); break;
+        default: csvContent = 'Data\n' + JSON.stringify(data, null, 2);
       }
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       await downloadFile(blob, filename.replace('.xlsx', '.csv'));
     } catch (error) {
       console.error('Excel generation error:', error);
-      const jsonBlob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      await downloadFile(jsonBlob, filename.replace('.xlsx', '.json'));
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      await downloadFile(blob, filename.replace('.xlsx', '.json'));
     }
   };
 
   // ── Multi-sheet Excel ─────────────────────────────────────────────────
   const generateMultiSheetExcel = async (data, filename) => {
     try {
-      if (typeof XLSX === 'undefined') { generateFallbackCSV(data, filename); return; }
-
-      const formatDate = (dateString) => {
-        if (!dateString) return 'N/A';
-        const date = new Date(dateString);
-        return `${String(date.getDate()).padStart(2,'0')}/${String(date.getMonth()+1).padStart(2,'0')}/${date.getFullYear()}`;
-      };
-      const formatPurity = (purity) => {
-        if (!purity || purity === 0) return '0.00';
-        const s = purity.toString(); const dot = s.indexOf('.');
-        return dot === -1 ? s + '.00' : s.substring(0, dot + 3).padEnd(dot + 3, '0');
-      };
-
+      if (typeof XLSX === 'undefined') { await generateFallbackCSV(data, filename); return; }
+      const formatPurity = (p) => { if (!p || p === 0) return '0.00'; const s = p.toString(); const d = s.indexOf('.'); return d === -1 ? s + '.00' : s.substring(0, d + 3).padEnd(d + 3, '0'); };
+      const formatDate = (ds) => { if (!ds) return 'N/A'; const d = new Date(ds); return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`; };
       const wb = XLSX.utils.book_new();
-      const allCategories = data.categories || {};
-      const goldCategories = Object.entries(allCategories).filter(([key]) => key.toLowerCase().includes('gold') || key.includes('_gold'));
-      const silverCategories = Object.entries(allCategories).filter(([key]) => key.toLowerCase().includes('silver') || key.includes('_silver'));
-
-      const goldWs = XLSX.utils.aoa_to_sheet(generateGoldSheetData(data, goldCategories, formatDate, formatPurity));
-      XLSX.utils.book_append_sheet(wb, goldWs, 'Gold Inventory');
-
-      const silverWs = XLSX.utils.aoa_to_sheet(generateSilverSheetData(data, silverCategories, formatDate, formatPurity));
-      XLSX.utils.book_append_sheet(wb, silverWs, 'Silver Inventory');
-
-      const mixedCategories = Object.entries(allCategories).filter(([key]) =>
-        !key.toLowerCase().includes('gold') && !key.includes('_gold') &&
-        !key.toLowerCase().includes('silver') && !key.includes('_silver')
-      );
-      if (mixedCategories.length > 0) {
-        const mixedWs = XLSX.utils.aoa_to_sheet(generateMixedCategoriesSheetData(data, mixedCategories, formatDate, formatPurity));
-        XLSX.utils.book_append_sheet(wb, mixedWs, 'Other Categories');
-      }
-
+      const allCats = data.categories || {};
+      const goldCats = Object.entries(allCats).filter(([k]) => k.toLowerCase().includes('gold') || k.includes('_gold'));
+      const silverCats = Object.entries(allCats).filter(([k]) => k.toLowerCase().includes('silver') || k.includes('_silver'));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(generateGoldSheetData(data, goldCats, formatDate, formatPurity)), 'Gold Inventory');
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(generateSilverSheetData(data, silverCats, formatDate, formatPurity)), 'Silver Inventory');
+      const mixedCats = Object.entries(allCats).filter(([k]) => !k.toLowerCase().includes('gold') && !k.includes('_gold') && !k.toLowerCase().includes('silver') && !k.includes('_silver'));
+      if (mixedCats.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(generateMixedCategoriesSheetData(data, mixedCats, formatDate, formatPurity)), 'Other Categories');
       await saveWorkbook(wb, filename);
     } catch (error) {
       console.error('Multi-sheet Excel error:', error);
@@ -620,127 +491,59 @@ const ReportPage = () => {
   };
 
   const generateGoldSheetData = (data, goldCategories, formatDate, formatPurity) => {
-    const sheetData = [];
-    sheetData.push(['GOLD INVENTORY REPORT']);
-    sheetData.push([`Generated on: ${formatDate(new Date().toISOString())}`]);
-    sheetData.push([]);
-    sheetData.push(['GOLD INVENTORY SUMMARY']);
-    sheetData.push(['Metric', 'Value']);
-    sheetData.push(['Total Gross Weight (g)', data.totalGoldGross || 0]);
-    sheetData.push(['Total Pure Weight (g)', data.totalGoldPure || 0]);
-    sheetData.push(['Average Purity (%)', data.goldAveragePurity || 0]);
-    sheetData.push([]);
+    const rows = [['GOLD INVENTORY REPORT'], [`Generated on: ${formatDate(new Date().toISOString())}`], [], ['GOLD INVENTORY SUMMARY'], ['Metric', 'Value'], ['Total Gross Weight (g)', data.totalGoldGross || 0], ['Total Pure Weight (g)', data.totalGoldPure || 0], ['Average Purity (%)', data.goldAveragePurity || 0], []];
     if (goldCategories.length > 0) {
-      sheetData.push(['GOLD CATEGORY BREAKDOWN']);
-      sheetData.push(['Category', 'Gross Weight (g)', 'Pure Weight (g)', 'Average Purity (%)', 'Total Items']);
-      goldCategories.forEach(([category, categoryData]) => {
-        sheetData.push([category, categoryData.grossWeight || 0, categoryData.pureWeight || 0, formatPurity(categoryData.averagePurity || 0), categoryData.totalItems || 0]);
-      });
-      sheetData.push([]);
-      goldCategories.forEach(([category, categoryData]) => {
-        if (categoryData.purities && Object.keys(categoryData.purities).length > 0) {
-          sheetData.push([`${category} - Purity Breakdown`]);
-          sheetData.push(['Purity (%)', 'Gross Weight (g)', 'Pure Weight (g)', 'Items']);
-          Object.entries(categoryData.purities).forEach(([purity, purityData]) => {
-            if (purityData.totalItems > 0) sheetData.push([purity, purityData.grossWeight || 0, purityData.pureWeight || 0, purityData.totalItems || 0]);
-          });
-          sheetData.push([]);
+      rows.push(['GOLD CATEGORY BREAKDOWN'], ['Category', 'Gross Weight (g)', 'Pure Weight (g)', 'Average Purity (%)', 'Total Items']);
+      goldCategories.forEach(([cat, cd]) => rows.push([cat, cd.grossWeight || 0, cd.pureWeight || 0, formatPurity(cd.averagePurity || 0), cd.totalItems || 0]));
+      rows.push([]);
+      goldCategories.forEach(([cat, cd]) => {
+        if (cd.purities && Object.keys(cd.purities).length > 0) {
+          rows.push([`${cat} - Purity Breakdown`], ['Purity (%)', 'Gross Weight (g)', 'Pure Weight (g)', 'Items']);
+          Object.entries(cd.purities).forEach(([p, pd]) => { if (pd.totalItems > 0) rows.push([p, pd.grossWeight || 0, pd.pureWeight || 0, pd.totalItems || 0]); });
+          rows.push([]);
         }
       });
-      const totalGoldPureWeight = data.totalGoldPure || 0;
-      if (totalGoldPureWeight > 0) {
-        sheetData.push(['GOLD CATEGORY DISTRIBUTION (By Pure Weight)']);
-        sheetData.push(['Category', 'Pure Weight (g)', 'Percentage (%)']);
-        goldCategories.forEach(([category, categoryData]) => {
-          if (categoryData.pureWeight > 0) {
-            const percentage = Math.round((categoryData.pureWeight / totalGoldPureWeight) * 10000) / 100;
-            sheetData.push([category, categoryData.pureWeight, percentage]);
-          }
-        });
-        sheetData.push([]);
+      const total = data.totalGoldPure || 0;
+      if (total > 0) {
+        rows.push(['GOLD CATEGORY DISTRIBUTION (By Pure Weight)'], ['Category', 'Pure Weight (g)', 'Percentage (%)']);
+        goldCategories.forEach(([cat, cd]) => { if (cd.pureWeight > 0) rows.push([cat, cd.pureWeight, Math.round((cd.pureWeight / total) * 10000) / 100]); });
+        rows.push([]);
       }
-    } else {
-      sheetData.push(['GOLD CATEGORY BREAKDOWN']);
-      sheetData.push(['No gold category data available']);
-      sheetData.push([]);
-    }
-    return sheetData;
+    } else { rows.push(['GOLD CATEGORY BREAKDOWN'], ['No gold category data available'], []); }
+    return rows;
   };
 
   const generateSilverSheetData = (data, silverCategories, formatDate, formatPurity) => {
-    const sheetData = [];
-    sheetData.push(['SILVER INVENTORY REPORT']);
-    sheetData.push([`Generated on: ${formatDate(new Date().toISOString())}`]);
-    sheetData.push([]);
-    sheetData.push(['SILVER INVENTORY SUMMARY']);
-    sheetData.push(['Metric', 'Value']);
-    sheetData.push(['Total Gross Weight (g)', data.totalSilverGross || 0]);
-    sheetData.push(['Total Pure Weight (g)', data.totalSilverPure || 0]);
-    sheetData.push(['Average Purity (%)', data.silverAveragePurity || 0]);
-    sheetData.push([]);
+    const rows = [['SILVER INVENTORY REPORT'], [`Generated on: ${formatDate(new Date().toISOString())}`], [], ['SILVER INVENTORY SUMMARY'], ['Metric', 'Value'], ['Total Gross Weight (g)', data.totalSilverGross || 0], ['Total Pure Weight (g)', data.totalSilverPure || 0], ['Average Purity (%)', data.silverAveragePurity || 0], []];
     if (silverCategories.length > 0) {
-      sheetData.push(['SILVER CATEGORY BREAKDOWN']);
-      sheetData.push(['Category', 'Gross Weight (g)', 'Pure Weight (g)', 'Average Purity (%)', 'Total Items']);
-      silverCategories.forEach(([category, categoryData]) => {
-        sheetData.push([category, categoryData.grossWeight || 0, categoryData.pureWeight || 0, formatPurity(categoryData.averagePurity || 0), categoryData.totalItems || 0]);
-      });
-      sheetData.push([]);
-      silverCategories.forEach(([category, categoryData]) => {
-        if (categoryData.purities && Object.keys(categoryData.purities).length > 0) {
-          sheetData.push([`${category} - Purity Breakdown`]);
-          sheetData.push(['Purity (%)', 'Gross Weight (g)', 'Pure Weight (g)', 'Items']);
-          Object.entries(categoryData.purities).forEach(([purity, purityData]) => {
-            if (purityData.totalItems > 0) sheetData.push([purity, purityData.grossWeight || 0, purityData.pureWeight || 0, purityData.totalItems || 0]);
-          });
-          sheetData.push([]);
+      rows.push(['SILVER CATEGORY BREAKDOWN'], ['Category', 'Gross Weight (g)', 'Pure Weight (g)', 'Average Purity (%)', 'Total Items']);
+      silverCategories.forEach(([cat, cd]) => rows.push([cat, cd.grossWeight || 0, cd.pureWeight || 0, formatPurity(cd.averagePurity || 0), cd.totalItems || 0]));
+      rows.push([]);
+      silverCategories.forEach(([cat, cd]) => {
+        if (cd.purities && Object.keys(cd.purities).length > 0) {
+          rows.push([`${cat} - Purity Breakdown`], ['Purity (%)', 'Gross Weight (g)', 'Pure Weight (g)', 'Items']);
+          Object.entries(cd.purities).forEach(([p, pd]) => { if (pd.totalItems > 0) rows.push([p, pd.grossWeight || 0, pd.pureWeight || 0, pd.totalItems || 0]); });
+          rows.push([]);
         }
       });
-      const totalSilverPureWeight = data.totalSilverPure || 0;
-      if (totalSilverPureWeight > 0) {
-        sheetData.push(['SILVER CATEGORY DISTRIBUTION (By Pure Weight)']);
-        sheetData.push(['Category', 'Pure Weight (g)', 'Percentage (%)']);
-        silverCategories.forEach(([category, categoryData]) => {
-          if (categoryData.pureWeight > 0) {
-            const percentage = Math.round((categoryData.pureWeight / totalSilverPureWeight) * 10000) / 100;
-            sheetData.push([category, categoryData.pureWeight, percentage]);
-          }
-        });
-        sheetData.push([]);
+      const total = data.totalSilverPure || 0;
+      if (total > 0) {
+        rows.push(['SILVER CATEGORY DISTRIBUTION (By Pure Weight)'], ['Category', 'Pure Weight (g)', 'Percentage (%)']);
+        silverCategories.forEach(([cat, cd]) => { if (cd.pureWeight > 0) rows.push([cat, cd.pureWeight, Math.round((cd.pureWeight / total) * 10000) / 100]); });
+        rows.push([]);
       }
-    } else {
-      sheetData.push(['SILVER CATEGORY BREAKDOWN']);
-      sheetData.push(['No silver category data available']);
-      sheetData.push([]);
-    }
-    return sheetData;
+    } else { rows.push(['SILVER CATEGORY BREAKDOWN'], ['No silver category data available'], []); }
+    return rows;
   };
 
   const generateMixedCategoriesSheetData = (data, mixedCategories, formatDate, formatPurity) => {
-    const sheetData = [];
-    sheetData.push(['OTHER CATEGORIES REPORT']);
-    sheetData.push([`Generated on: ${formatDate(new Date().toISOString())}`]);
-    sheetData.push([]);
+    const rows = [['OTHER CATEGORIES REPORT'], [`Generated on: ${formatDate(new Date().toISOString())}`], []];
     if (mixedCategories.length > 0) {
-      sheetData.push(['OTHER CATEGORIES BREAKDOWN']);
-      sheetData.push(['Category', 'Gross Weight (g)', 'Pure Weight (g)', 'Average Purity (%)', 'Total Items']);
-      mixedCategories.forEach(([category, categoryData]) => {
-        sheetData.push([category, categoryData.grossWeight || 0, categoryData.pureWeight || 0, formatPurity(categoryData.averagePurity || 0), categoryData.totalItems || 0]);
-      });
-      sheetData.push([]);
-      mixedCategories.forEach(([category, categoryData]) => {
-        if (categoryData.purities && Object.keys(categoryData.purities).length > 0) {
-          sheetData.push([`${category} - Purity Breakdown`]);
-          sheetData.push(['Purity (%)', 'Gross Weight (g)', 'Pure Weight (g)', 'Items']);
-          Object.entries(categoryData.purities).forEach(([purity, purityData]) => {
-            if (purityData.totalItems > 0) sheetData.push([purity, purityData.grossWeight || 0, purityData.pureWeight || 0, purityData.totalItems || 0]);
-          });
-          sheetData.push([]);
-        }
-      });
-    } else {
-      sheetData.push(['No other category data available']);
-    }
-    return sheetData;
+      rows.push(['OTHER CATEGORIES BREAKDOWN'], ['Category', 'Gross Weight (g)', 'Pure Weight (g)', 'Average Purity (%)', 'Total Items']);
+      mixedCategories.forEach(([cat, cd]) => rows.push([cat, cd.grossWeight || 0, cd.pureWeight || 0, formatPurity(cd.averagePurity || 0), cd.totalItems || 0]));
+      rows.push([]);
+    } else { rows.push(['No other category data available']); }
+    return rows;
   };
 
   const generateFallbackCSV = async (data, filename) => {
@@ -750,95 +553,42 @@ const ReportPage = () => {
   };
 
   const formatStockDataForCSV = (data, reportType) => {
-    const formatDate = (dateString) => {
-      if (!dateString) return 'N/A';
-      return new Date(dateString).toLocaleDateString('en-GB');
+    const formatPurity = (p) => { if (!p || p === 0) return '0.00'; const s = p.toString(); const d = s.indexOf('.'); return d === -1 ? s + '.00' : s.substring(0, d + 3).padEnd(d + 3, '0'); };
+    const purityCSV = (purities, cat, metal = '') => {
+      if (!purities || Object.keys(purities).length === 0) return `${metal ? metal + ' - ' : ''}${cat} - Purity Breakdown,No purity data\n`;
+      let csv = `${metal ? metal + ' - ' : ''}${cat} - Purity Breakdown\nPurity (%),Gross Weight (g),Pure Weight (g),Items\n`;
+      Object.entries(purities).forEach(([p, pd]) => { if (pd.totalItems > 0) csv += `${p},${pd.grossWeight || 0},${pd.pureWeight || 0},${pd.totalItems || 0}\n`; });
+      return csv + '\n';
     };
-    const formatPurity = (purity) => {
-      if (!purity || purity === 0) return '0.00';
-      const s = purity.toString(); const dot = s.indexOf('.');
-      return dot === -1 ? s + '.00' : s.substring(0, dot + 3).padEnd(dot + 3, '0');
-    };
-    const addPurityBreakdownCSV = (purities, categoryName, metalType = '') => {
-      if (!purities || Object.keys(purities).length === 0) return `${metalType ? metalType + ' - ' : ''}${categoryName} - Purity Breakdown,No purity data available\n`;
-      let csv = `${metalType ? metalType + ' - ' : ''}${categoryName} - Purity Breakdown\n`;
-      csv += 'Purity (%),Gross Weight (g),Pure Weight (g),Items\n';
-      Object.entries(purities).forEach(([purity, purityData]) => {
-        if (purityData.totalItems > 0) csv += `${purity},${purityData.grossWeight || 0},${purityData.pureWeight || 0},${purityData.totalItems || 0}\n`;
-      });
-      csv += '\n';
-      return csv;
-    };
-
+    const today = new Date().toLocaleDateString('en-GB');
     if (reportType === 'stock-full') {
-      let csv = 'COMPLETE INVENTORY REPORT\n';
-      csv += `Generated on: ${formatDate(new Date().toISOString())}\n\n`;
-      if (data.totalGoldGross > 0 || (data.categories && Object.keys(data.categories).filter(k => k.includes('_gold')).length > 0)) {
-        csv += 'GOLD INVENTORY SUMMARY\nMetric,Value\n';
-        csv += `Total Gross Weight (g),${data.totalGoldGross || 0}\nTotal Pure Weight (g),${data.totalGoldPure || 0}\nAverage Purity (%),${data.goldAveragePurity || 0}\n\n`;
+      let csv = `COMPLETE INVENTORY REPORT\nGenerated on: ${today}\n\n`;
+      const goldCats = Object.entries(data.categories || {}).filter(([k]) => k.includes('_gold'));
+      const silverCats = Object.entries(data.categories || {}).filter(([k]) => k.includes('_silver'));
+      if (data.totalGoldGross > 0 || goldCats.length > 0) {
+        csv += `GOLD INVENTORY SUMMARY\nMetric,Value\nTotal Gross Weight (g),${data.totalGoldGross || 0}\nTotal Pure Weight (g),${data.totalGoldPure || 0}\nAverage Purity (%),${data.goldAveragePurity || 0}\n\n`;
         csv += 'GOLD CATEGORY BREAKDOWN\nCategory,Gross Weight (g),Pure Weight (g),Average Purity (%),Total Items\n';
-        const goldCategories = Object.entries(data.categories || {}).filter(([key]) => key.includes('_gold'));
-        if (goldCategories.length > 0) {
-          goldCategories.forEach(([category, categoryData]) => {
-            csv += `${category},${categoryData.grossWeight || 0},${categoryData.pureWeight || 0},${formatPurity(categoryData.averagePurity)},${categoryData.totalItems || 0}\n`;
-          });
-          csv += '\n';
-          goldCategories.forEach(([category, categoryData]) => { csv += addPurityBreakdownCSV(categoryData.purities, category, 'Gold'); });
-          csv += 'GOLD CATEGORY DISTRIBUTION (By Pure Weight)\nCategory,Pure Weight (g),Percentage (%)\n';
-          const totalGoldPureWeight = data.totalGoldPure || 0;
-          goldCategories.forEach(([category, categoryData]) => {
-            if (categoryData.pureWeight > 0) {
-              const percentage = totalGoldPureWeight > 0 ? Math.floor((categoryData.pureWeight / totalGoldPureWeight) * 10000) / 100 : 0;
-              csv += `${category},${categoryData.pureWeight},${percentage}\n`;
-            }
-          });
-          csv += '\n';
-        } else { csv += 'No gold category data available\n\n'; }
+        goldCats.forEach(([cat, cd]) => { csv += `${cat},${cd.grossWeight || 0},${cd.pureWeight || 0},${formatPurity(cd.averagePurity)},${cd.totalItems || 0}\n`; });
+        csv += '\n';
+        goldCats.forEach(([cat, cd]) => { csv += purityCSV(cd.purities, cat, 'Gold'); });
       }
-      if (data.totalSilverGross > 0 || (data.categories && Object.keys(data.categories).filter(k => k.includes('_silver')).length > 0)) {
-        csv += 'SILVER INVENTORY SUMMARY\nMetric,Value\n';
-        csv += `Total Gross Weight (g),${data.totalSilverGross || 0}\nTotal Pure Weight (g),${data.totalSilverPure || 0}\nAverage Purity (%),${data.silverAveragePurity || 0}\n\n`;
+      if (data.totalSilverGross > 0 || silverCats.length > 0) {
+        csv += `SILVER INVENTORY SUMMARY\nMetric,Value\nTotal Gross Weight (g),${data.totalSilverGross || 0}\nTotal Pure Weight (g),${data.totalSilverPure || 0}\nAverage Purity (%),${data.silverAveragePurity || 0}\n\n`;
         csv += 'SILVER CATEGORY BREAKDOWN\nCategory,Gross Weight (g),Pure Weight (g),Average Purity (%),Total Items\n';
-        const silverCategories = Object.entries(data.categories || {}).filter(([key]) => key.includes('_silver'));
-        if (silverCategories.length > 0) {
-          silverCategories.forEach(([category, categoryData]) => {
-            csv += `${category},${categoryData.grossWeight || 0},${categoryData.pureWeight || 0},${formatPurity(categoryData.averagePurity)},${categoryData.totalItems || 0}\n`;
-          });
-          csv += '\n';
-          silverCategories.forEach(([category, categoryData]) => { csv += addPurityBreakdownCSV(categoryData.purities, category, 'Silver'); });
-          csv += 'SILVER CATEGORY DISTRIBUTION (By Pure Weight)\nCategory,Pure Weight (g),Percentage (%)\n';
-          const totalSilverPureWeight = data.totalSilverPure || 0;
-          silverCategories.forEach(([category, categoryData]) => {
-            if (categoryData.pureWeight > 0) {
-              const percentage = totalSilverPureWeight > 0 ? Math.floor((categoryData.pureWeight / totalSilverPureWeight) * 10000) / 100 : 0;
-              csv += `${category},${categoryData.pureWeight},${percentage}\n`;
-            }
-          });
-          csv += '\n';
-        } else { csv += 'No silver category data available\n\n'; }
+        silverCats.forEach(([cat, cd]) => { csv += `${cat},${cd.grossWeight || 0},${cd.pureWeight || 0},${formatPurity(cd.averagePurity)},${cd.totalItems || 0}\n`; });
+        csv += '\n';
+        silverCats.forEach(([cat, cd]) => { csv += purityCSV(cd.purities, cat, 'Silver'); });
       }
       return csv;
     } else {
       const metalType = reportType === 'stock-gold' ? 'GOLD' : 'SILVER';
-      let csv = `${metalType} INVENTORY REPORT\nGenerated on: ${formatDate(new Date().toISOString())}\n\n`;
+      let csv = `${metalType} INVENTORY REPORT\nGenerated on: ${today}\n\n`;
       if (data.categories && Object.keys(data.categories).length > 0) {
-        csv += `${metalType} INVENTORY SUMMARY\nMetric,Value\n`;
-        csv += `Total Gross Weight (g),${data.totalGross || 0}\nTotal Pure Weight (g),${data.totalPure || 0}\nAverage Purity (%),${data.averagePurity || 0}\n\n`;
+        csv += `${metalType} INVENTORY SUMMARY\nMetric,Value\nTotal Gross Weight (g),${data.totalGross || 0}\nTotal Pure Weight (g),${data.totalPure || 0}\nAverage Purity (%),${data.averagePurity || 0}\n\n`;
         csv += `${metalType} CATEGORY BREAKDOWN\nCategory,Gross Weight (g),Pure Weight (g),Average Purity (%),Total Items\n`;
-        Object.entries(data.categories).forEach(([category, categoryData]) => {
-          csv += `${category},${categoryData.grossWeight || 0},${categoryData.pureWeight || 0},${formatPurity(categoryData.averagePurity)},${categoryData.totalItems || 0}\n`;
-        });
+        Object.entries(data.categories).forEach(([cat, cd]) => { csv += `${cat},${cd.grossWeight || 0},${cd.pureWeight || 0},${formatPurity(cd.averagePurity)},${cd.totalItems || 0}\n`; });
         csv += '\n';
-        Object.entries(data.categories).forEach(([category, categoryData]) => { csv += addPurityBreakdownCSV(categoryData.purities, category); });
-        csv += `${metalType} CATEGORY DISTRIBUTION (By Pure Weight)\nCategory,Pure Weight (g),Percentage (%)\n`;
-        const totalPureWeight = data.totalPure || 0;
-        Object.entries(data.categories).forEach(([category, categoryData]) => {
-          if (categoryData.pureWeight > 0) {
-            const percentage = totalPureWeight > 0 ? Math.floor((categoryData.pureWeight / totalPureWeight) * 10000) / 100 : 0;
-            csv += `${category},${categoryData.pureWeight},${percentage}\n`;
-          }
-        });
-        csv += '\n';
+        Object.entries(data.categories).forEach(([cat, cd]) => { csv += purityCSV(cd.purities, cat); });
       } else { csv += `No ${metalType.toLowerCase()} data available\n\n`; }
       return csv;
     }
@@ -865,11 +615,7 @@ const ReportPage = () => {
     }
   };
 
-  const getTodayFormatted = () => {
-    const today = new Date();
-    return formatDateForAPI(formatDateObjectForDisplay(today));
-  };
-
+  const getTodayFormatted = () => formatDateForAPI(formatDateObjectForDisplay(new Date()));
   const [dateRange, setDateRange] = useState({ startDate: getTodayFormatted(), endDate: getTodayFormatted() });
 
   useEffect(() => { fetchSalesData(dateRange.startDate, dateRange.endDate); }, []);
@@ -882,31 +628,16 @@ const ReportPage = () => {
 
   const handleQuickDateSelect = (period) => {
     const now = new Date();
-    let startDate, endDate;
-    switch (period) {
-      case 'today':
-        startDate = endDate = formatDateForAPI(formatDateObjectForDisplay(now)); break;
-      case 'week':
-        const weekStart = new Date(); weekStart.setDate(now.getDate() - 7);
-        startDate = formatDateForAPI(formatDateObjectForDisplay(weekStart));
-        endDate = formatDateForAPI(formatDateObjectForDisplay(now)); break;
-      case 'month':
-        const monthStart = new Date(); monthStart.setMonth(now.getMonth() - 1);
-        startDate = formatDateForAPI(formatDateObjectForDisplay(monthStart));
-        endDate = formatDateForAPI(formatDateObjectForDisplay(now)); break;
-      case '6months':
-        const sixMonthsStart = new Date(); sixMonthsStart.setMonth(now.getMonth() - 6);
-        startDate = formatDateForAPI(formatDateObjectForDisplay(sixMonthsStart));
-        endDate = formatDateForAPI(formatDateObjectForDisplay(now)); break;
-      case 'year':
-        const yearStart = new Date(); yearStart.setFullYear(now.getFullYear() - 1);
-        startDate = formatDateForAPI(formatDateObjectForDisplay(yearStart));
-        endDate = formatDateForAPI(formatDateObjectForDisplay(now)); break;
-      case 'alltime':
-        setDateRange({ startDate: '', endDate: '' }); return;
-      default: return;
-    }
-    setDateRange({ startDate, endDate });
+    if (period === 'alltime') { setDateRange({ startDate: '', endDate: '' }); return; }
+    let start = new Date();
+    if (period === 'week') start.setDate(now.getDate() - 7);
+    else if (period === 'month') start.setMonth(now.getMonth() - 1);
+    else if (period === '6months') start.setMonth(now.getMonth() - 6);
+    else if (period === 'year') start.setFullYear(now.getFullYear() - 1);
+    setDateRange({
+      startDate: formatDateForAPI(formatDateObjectForDisplay(start)),
+      endDate: formatDateForAPI(formatDateObjectForDisplay(now))
+    });
   };
 
   // ── Sales PDF ─────────────────────────────────────────────────────────
@@ -917,7 +648,6 @@ const ReportPage = () => {
       let yPosition = 20;
       const pageHeight = doc.internal.pageSize.height;
       const margin = 20;
-
       const addText = (text, fontSize = 10, isBold = false, leftMargin = 0) => {
         if (yPosition > pageHeight - 30) { doc.addPage(); yPosition = 20; }
         doc.setFont('helvetica', isBold ? 'bold' : 'normal');
@@ -926,108 +656,73 @@ const ReportPage = () => {
         yPosition += fontSize + 2;
       };
       const addSpace = (space = 5) => { yPosition += space; };
-
       generateCleanSalesPDF(doc, data, { addText, addSpace });
       await saveDoc(doc, filename);
     } catch (error) {
-      console.error('PDF generation error:', error);
+      console.error('Sales PDF error:', error);
       throw new Error('Failed to generate PDF report');
     }
   };
 
   const generateCleanSalesPDF = (doc, data, { addText, addSpace }) => {
-    addText('SALES REPORT', 16, true);
-    addSpace(5);
+    addText('SALES REPORT', 16, true); addSpace(5);
     if (data.dateRange) {
-      const startDate = data.dateRange.startDate ? formatAPIDateForDisplay(data.dateRange.startDate) : 'Start';
-      const endDate = data.dateRange.endDate ? formatAPIDateForDisplay(data.dateRange.endDate) : 'End';
-      addText(`Report Period: ${startDate} to ${endDate}`, 10);
+      addText(`Report Period: ${data.dateRange.startDate ? formatAPIDateForDisplay(data.dateRange.startDate) : 'Start'} to ${data.dateRange.endDate ? formatAPIDateForDisplay(data.dateRange.endDate) : 'End'}`, 10);
       addText(`Generated on: ${formatDateObjectForDisplay(new Date())}`, 10);
     }
     addSpace(10);
     if (data.summary) {
-      addText('EXECUTIVE SUMMARY', 12, true);
-      addSpace(3);
+      addText('EXECUTIVE SUMMARY', 12, true); addSpace(3);
       addText(`Total Revenue: Rs ${(data.summary.totalRevenue || 0).toLocaleString()}`, 10);
       addText(`Total Items Sold: ${data.summary.totalItems || 0} items`, 10);
-      const avgSale = data.summary.totalItems ? Math.round(data.summary.totalRevenue / data.summary.totalItems) : 0;
-      addText(`Average Sale Value: Rs ${avgSale.toLocaleString()}`, 10);
+      addText(`Average Sale Value: Rs ${data.summary.totalItems ? Math.round(data.summary.totalRevenue / data.summary.totalItems).toLocaleString() : 0}`, 10);
     }
     addSpace(15);
     if (data.byMetal) {
-      addText('METAL-WISE PERFORMANCE', 12, true);
-      addSpace(5);
+      addText('METAL-WISE PERFORMANCE', 12, true); addSpace(5);
       if (data.byMetal.gold && data.byMetal.gold.totalRevenue > 0) {
-        let goldItemsSold = 0;
-        if (data.topPerformers) goldItemsSold = data.topPerformers.filter(i => i.metalType === 'gold').reduce((s, i) => s + (i.totalItems || 0), 0);
-        if (goldItemsSold === 0 && data.summary) goldItemsSold = Math.round(data.summary.totalItems * (data.byMetal.gold.totalRevenue / (data.summary.totalRevenue || 1)));
+        const goldItems = data.topPerformers ? data.topPerformers.filter(i => i.metalType === 'gold').reduce((s, i) => s + (i.totalItems || 0), 0) : 0;
         addText('Gold Sales:', 11, true);
         addText(`Revenue: Rs ${(data.byMetal.gold.totalRevenue || 0).toLocaleString()}`, 10);
         addText(`Gross Weight: ${data.byMetal.gold.totalWeight || 0} grams`, 10);
         addText(`Pure Weight: ${data.byMetal.gold.totalPureWeight || 0} grams`, 10);
-        addText(`Total Items Sold: ${goldItemsSold} items`, 10);
-        addSpace(8);
+        addText(`Total Items Sold: ${goldItems} items`, 10); addSpace(8);
       }
       if (data.byMetal.silver && data.byMetal.silver.totalRevenue > 0) {
-        let silverItemsSold = 0;
-        if (data.topPerformers) silverItemsSold = data.topPerformers.filter(i => i.metalType === 'silver').reduce((s, i) => s + (i.totalItems || 0), 0);
-        if (silverItemsSold === 0 && data.summary) silverItemsSold = Math.round(data.summary.totalItems * (data.byMetal.silver.totalRevenue / (data.summary.totalRevenue || 1)));
+        const silverItems = data.topPerformers ? data.topPerformers.filter(i => i.metalType === 'silver').reduce((s, i) => s + (i.totalItems || 0), 0) : 0;
         addText('Silver Sales:', 11, true);
         addText(`Revenue: Rs ${(data.byMetal.silver.totalRevenue || 0).toLocaleString()}`, 10);
         addText(`Gross Weight: ${data.byMetal.silver.totalWeight || 0} grams`, 10);
         addText(`Pure Weight: ${data.byMetal.silver.totalPureWeight || 0} grams`, 10);
-        addText(`Total Items Sold: ${silverItemsSold} items`, 10);
-        addSpace(8);
+        addText(`Total Items Sold: ${silverItems} items`, 10); addSpace(8);
       }
     }
     addSpace(10);
     if (data.topPerformers && data.topPerformers.length > 0) {
-      addText('TOP REVENUE GENERATORS', 12, true);
-      addSpace(5);
-      [...data.topPerformers].sort((a, b) => (b.totalSalesAmount || 0) - (a.totalSalesAmount || 0)).slice(0, 10).forEach((item, index) => {
-        addText(`${index + 1}. ${item.metalType || 'N/A'} ${item.category || 'N/A'} (${item.purity || 0}% purity)`, 10, true);
+      addText('TOP REVENUE GENERATORS', 12, true); addSpace(5);
+      [...data.topPerformers].sort((a, b) => (b.totalSalesAmount || 0) - (a.totalSalesAmount || 0)).slice(0, 10).forEach((item, i) => {
+        addText(`${i + 1}. ${item.metalType || 'N/A'} ${item.category || 'N/A'} (${item.purity || 0}% purity)`, 10, true);
         addText(`   Revenue: Rs ${(item.totalSalesAmount || 0).toLocaleString()}`, 10);
         addText(`   Weight: ${item.totalGrossWeight || 0}g gross, ${item.totalPureWeight || 0}g pure`, 10);
-        addText(`   Items Sold: ${item.totalItems || 0} items`, 10);
-        addSpace(3);
+        addText(`   Items Sold: ${item.totalItems || 0} items`, 10); addSpace(3);
       });
-    }
-    addSpace(15);
-    if (data.topPerformers && data.topPerformers.length > 0) {
-      addText('TOP SOLD QUANTITY ITEMS', 12, true);
-      addSpace(5);
-      [...data.topPerformers].sort((a, b) => (b.totalItems || 0) - (a.totalItems || 0)).slice(0, 10).forEach((item, index) => {
-        addText(`${index + 1}. ${item.metalType || 'N/A'} ${item.category || 'N/A'} (${item.purity || 0}% purity)`, 10, true);
+      addSpace(15);
+      addText('TOP SOLD QUANTITY ITEMS', 12, true); addSpace(5);
+      [...data.topPerformers].sort((a, b) => (b.totalItems || 0) - (a.totalItems || 0)).slice(0, 10).forEach((item, i) => {
+        addText(`${i + 1}. ${item.metalType || 'N/A'} ${item.category || 'N/A'} (${item.purity || 0}% purity)`, 10, true);
         addText(`   Items Sold: ${item.totalItems || 0} items`, 10);
-        addText(`   Revenue: Rs ${(item.totalSalesAmount || 0).toLocaleString()}`, 10);
-        addText(`   Weight: ${item.totalGrossWeight || 0}g gross, ${item.totalPureWeight || 0}g pure`, 10);
-        addSpace(3);
+        addText(`   Revenue: Rs ${(item.totalSalesAmount || 0).toLocaleString()}`, 10); addSpace(3);
       });
     }
     addSpace(15);
     if (data.entries && data.entries.length > 0) {
-      addText('RECENT SALES TRANSACTIONS', 12, true);
-      addSpace(5);
-      data.entries.slice(0, 20).forEach((entry, index) => {
-        const date = formatAPIDateForDisplay(entry.soldAt);
-        const quantity = entry.isBulk ? `${entry.itemCount || 1} items (Bulk Sale)` : '1 item';
-        addText(`${index + 1}. ${date} - ${entry.metalType || 'N/A'} ${entry.category || 'N/A'}`, 10, true);
-        addText(`   Purity: ${entry.purity || 0}%, Weight: ${entry.weight || 0}g`, 10);
-        addText(`   Price: Rs ${(entry.salesPrice || 0).toLocaleString()}`, 10);
-        addText(`   Quantity: ${quantity}`, 10);
-        const customerInfo = [];
-        if (entry.customerName) customerInfo.push(`Name: ${entry.customerName}`);
-        if (entry.customerMobile) customerInfo.push(`Mobile: ${entry.customerMobile}`);
-        if (entry.customerAddress) customerInfo.push(`Address: ${entry.customerAddress}`);
-        addText(`   Customer: ${customerInfo.length > 0 ? customerInfo.join(', ') : 'Not provided'}`, 10);
-        addSpace(3);
+      addText('RECENT SALES TRANSACTIONS', 12, true); addSpace(5);
+      data.entries.slice(0, 20).forEach((entry, i) => {
+        addText(`${i + 1}. ${formatAPIDateForDisplay(entry.soldAt)} - ${entry.metalType || 'N/A'} ${entry.category || 'N/A'}`, 10, true);
+        addText(`   Purity: ${entry.purity || 0}%, Weight: ${entry.weight || 0}g, Price: Rs ${(entry.salesPrice || 0).toLocaleString()}`, 10);
+        const customer = [entry.customerName, entry.customerMobile, entry.customerAddress].filter(Boolean).join(', ');
+        addText(`   Customer: ${customer || 'Not provided'}`, 10); addSpace(3);
       });
-      if (data.entries.length > 20) { addSpace(5); addText(`Note: Showing recent 20 transactions out of ${data.entries.length} total`, 9); }
-    } else {
-      addText('SALES TRANSACTIONS', 12, true);
-      addSpace(5);
-      addText('Individual transaction details are not included in this report.', 10);
-      addText('To view transaction details, enable "Include Entries" option when generating the report.', 10);
     }
     addSpace(15);
     addText('This report is system generated and contains confidential business information.', 8);
@@ -1038,8 +733,7 @@ const ReportPage = () => {
   const generateSalesExcel = (data) => {
     const wb = XLSX.utils.book_new();
     const summaryData = [
-      ['SALES REPORT'], [''],
-      ['EXECUTIVE SUMMARY'],
+      ['SALES REPORT'], [''], ['EXECUTIVE SUMMARY'],
       ['Report Period', `${data.dateRange?.startDate ? formatAPIDateForDisplay(data.dateRange.startDate) : 'Start'} to ${data.dateRange?.endDate ? formatAPIDateForDisplay(data.dateRange.endDate) : 'End'}`],
       ['Generated on', formatDateObjectForDisplay(new Date())], [''],
       ['Total Revenue', `Rs ${(data.summary?.totalRevenue || 0).toLocaleString()}`],
@@ -1048,75 +742,34 @@ const ReportPage = () => {
       [''], ['METAL-WISE PERFORMANCE'], ['']
     ];
     if (data.byMetal?.gold && data.byMetal.gold.totalRevenue > 0) {
-      let goldItemsSold = data.topPerformers ? data.topPerformers.filter(i => i.metalType === 'gold').reduce((s, i) => s + (i.totalItems || 0), 0) : 0;
-      summaryData.push(['Gold Sales', ''], ['Revenue', `Rs ${(data.byMetal.gold.totalRevenue || 0).toLocaleString()}`], ['Gross Weight', `${data.byMetal.gold.totalWeight || 0} grams`], ['Pure Weight', `${data.byMetal.gold.totalPureWeight || 0} grams`], ['Total Items Sold', `${goldItemsSold} items`], ['']);
+      const gi = data.topPerformers ? data.topPerformers.filter(i => i.metalType === 'gold').reduce((s, i) => s + (i.totalItems || 0), 0) : 0;
+      summaryData.push(['Gold Sales', ''], ['Revenue', `Rs ${(data.byMetal.gold.totalRevenue || 0).toLocaleString()}`], ['Gross Weight', `${data.byMetal.gold.totalWeight || 0} grams`], ['Pure Weight', `${data.byMetal.gold.totalPureWeight || 0} grams`], ['Total Items Sold', `${gi} items`], ['']);
     }
     if (data.byMetal?.silver && data.byMetal.silver.totalRevenue > 0) {
-      let silverItemsSold = data.topPerformers ? data.topPerformers.filter(i => i.metalType === 'silver').reduce((s, i) => s + (i.totalItems || 0), 0) : 0;
-      summaryData.push(['Silver Sales', ''], ['Revenue', `Rs ${(data.byMetal.silver.totalRevenue || 0).toLocaleString()}`], ['Gross Weight', `${data.byMetal.silver.totalWeight || 0} grams`], ['Pure Weight', `${data.byMetal.silver.totalPureWeight || 0} grams`], ['Total Items Sold', `${silverItemsSold} items`], ['']);
+      const si = data.topPerformers ? data.topPerformers.filter(i => i.metalType === 'silver').reduce((s, i) => s + (i.totalItems || 0), 0) : 0;
+      summaryData.push(['Silver Sales', ''], ['Revenue', `Rs ${(data.byMetal.silver.totalRevenue || 0).toLocaleString()}`], ['Gross Weight', `${data.byMetal.silver.totalWeight || 0} grams`], ['Pure Weight', `${data.byMetal.silver.totalPureWeight || 0} grams`], ['Total Items Sold', `${si} items`], ['']);
     }
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryData), 'Summary');
-
     if (data.topPerformers && data.topPerformers.length > 0) {
-      const topRevenueData = [['TOP REVENUE GENERATORS'], [''], ['Rank', 'Metal Type', 'Category', 'Purity (%)', 'Revenue', 'Gross Weight (g)', 'Pure Weight (g)', 'Items Sold']];
-      [...data.topPerformers].sort((a, b) => (b.totalSalesAmount || 0) - (a.totalSalesAmount || 0)).slice(0, 10).forEach((item, i) => {
-        topRevenueData.push([i + 1, item.metalType || 'N/A', item.category || 'N/A', item.purity || 0, `Rs ${(item.totalSalesAmount || 0).toLocaleString()}`, item.totalGrossWeight || 0, item.totalPureWeight || 0, item.totalItems || 0]);
-      });
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(topRevenueData), 'Top Revenue Generators');
-
-      const topQuantityData = [['TOP SOLD QUANTITY ITEMS'], [''], ['Rank', 'Metal Type', 'Category', 'Purity (%)', 'Items Sold', 'Revenue', 'Gross Weight (g)', 'Pure Weight (g)']];
-      [...data.topPerformers].sort((a, b) => (b.totalItems || 0) - (a.totalItems || 0)).slice(0, 10).forEach((item, i) => {
-        topQuantityData.push([i + 1, item.metalType || 'N/A', item.category || 'N/A', item.purity || 0, item.totalItems || 0, `Rs ${(item.totalSalesAmount || 0).toLocaleString()}`, item.totalGrossWeight || 0, item.totalPureWeight || 0]);
-      });
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(topQuantityData), 'Top Sold Quantity');
-
-      const goldItems = data.topPerformers.filter(i => i.metalType === 'gold');
-      if (goldItems.length > 0) {
-        const goldData = [['GOLD WEIGHT LEADERS'], [''], ['Rank', 'Category', 'Purity (%)', 'Gross Weight (g)', 'Pure Weight (g)', 'Items Sold', 'Revenue']];
-        [...goldItems].sort((a, b) => (b.totalGrossWeight || 0) - (a.totalGrossWeight || 0)).slice(0, 10).forEach((item, i) => {
-          goldData.push([i + 1, item.category || 'N/A', item.purity || 0, item.totalGrossWeight || 0, item.totalPureWeight || 0, item.totalItems || 0, `Rs ${(item.totalSalesAmount || 0).toLocaleString()}`]);
-        });
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(goldData), 'Gold Weight Leaders');
-      }
-
-      const silverItems = data.topPerformers.filter(i => i.metalType === 'silver');
-      if (silverItems.length > 0) {
-        const silverData = [['SILVER WEIGHT LEADERS'], [''], ['Rank', 'Category', 'Purity (%)', 'Gross Weight (g)', 'Pure Weight (g)', 'Items Sold', 'Revenue']];
-        [...silverItems].sort((a, b) => (b.totalGrossWeight || 0) - (a.totalGrossWeight || 0)).slice(0, 10).forEach((item, i) => {
-          silverData.push([i + 1, item.category || 'N/A', item.purity || 0, item.totalGrossWeight || 0, item.totalPureWeight || 0, item.totalItems || 0, `Rs ${(item.totalSalesAmount || 0).toLocaleString()}`]);
-        });
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(silverData), 'Silver Weight Leaders');
-      }
+      const rd = [['TOP REVENUE GENERATORS'], [''], ['Rank', 'Metal Type', 'Category', 'Purity (%)', 'Revenue', 'Gross Weight (g)', 'Pure Weight (g)', 'Items Sold']];
+      [...data.topPerformers].sort((a, b) => (b.totalSalesAmount || 0) - (a.totalSalesAmount || 0)).slice(0, 10).forEach((item, i) => rd.push([i + 1, item.metalType || 'N/A', item.category || 'N/A', item.purity || 0, `Rs ${(item.totalSalesAmount || 0).toLocaleString()}`, item.totalGrossWeight || 0, item.totalPureWeight || 0, item.totalItems || 0]));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rd), 'Top Revenue Generators');
+      const qd = [['TOP SOLD QUANTITY ITEMS'], [''], ['Rank', 'Metal Type', 'Category', 'Purity (%)', 'Items Sold', 'Revenue', 'Gross Weight (g)', 'Pure Weight (g)']];
+      [...data.topPerformers].sort((a, b) => (b.totalItems || 0) - (a.totalItems || 0)).slice(0, 10).forEach((item, i) => qd.push([i + 1, item.metalType || 'N/A', item.category || 'N/A', item.purity || 0, item.totalItems || 0, `Rs ${(item.totalSalesAmount || 0).toLocaleString()}`, item.totalGrossWeight || 0, item.totalPureWeight || 0]));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(qd), 'Top Sold Quantity');
     }
-
     if (data.entries && data.entries.length > 0) {
-      const transactionData = [['RECENT SALES TRANSACTIONS'], [''], ['#', 'Date', 'Metal Type', 'Category', 'Purity (%)', 'Weight (g)', 'Price', 'Quantity', 'Customer Name', 'Customer Mobile', 'Customer Address']];
-      data.entries.slice(0, 20).forEach((entry, i) => {
-        transactionData.push([i + 1, formatAPIDateForDisplay(entry.soldAt), entry.metalType || 'N/A', entry.category || 'N/A', entry.purity || 0, entry.weight || 0, `Rs ${(entry.salesPrice || 0).toLocaleString()}`, entry.isBulk ? `${entry.itemCount || 1} items (Bulk Sale)` : '1 item', entry.customerName || 'Not provided', entry.customerMobile || 'Not provided', entry.customerAddress || 'Not provided']);
-      });
-      if (data.entries.length > 20) transactionData.push(['', '', '', '', '', '', '', '', '', '', `Note: Showing 20 of ${data.entries.length} total`]);
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(transactionData), 'Recent Transactions');
-    } else {
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['SALES TRANSACTIONS'], [''], ['Individual transaction details are not included in this report.']]), 'Transactions Note');
+      const td = [['RECENT SALES TRANSACTIONS'], [''], ['#', 'Date', 'Metal Type', 'Category', 'Purity (%)', 'Weight (g)', 'Price', 'Quantity', 'Customer Name', 'Customer Mobile', 'Customer Address']];
+      data.entries.slice(0, 20).forEach((entry, i) => td.push([i + 1, formatAPIDateForDisplay(entry.soldAt), entry.metalType || 'N/A', entry.category || 'N/A', entry.purity || 0, entry.weight || 0, `Rs ${(entry.salesPrice || 0).toLocaleString()}`, entry.isBulk ? `${entry.itemCount || 1} items (Bulk)` : '1 item', entry.customerName || 'Not provided', entry.customerMobile || 'Not provided', entry.customerAddress || 'Not provided']));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(td), 'Recent Transactions');
     }
     return wb;
   };
 
   const formatSalesDataForCSV = (data) => {
-    let csv = '\uFEFF';
-    csv += 'SALES REPORT\n\nEXECUTIVE SUMMARY\n';
+    let csv = '\uFEFFSALES REPORT\n\nEXECUTIVE SUMMARY\n';
     csv += `Report Period,${data.dateRange?.startDate ? formatAPIDateForDisplay(data.dateRange.startDate) : 'Start'} to ${data.dateRange?.endDate ? formatAPIDateForDisplay(data.dateRange.endDate) : 'End'}\n`;
-    csv += `Generated on,${formatDateObjectForDisplay(new Date())}\n\n`;
-    csv += `Total Revenue,Rs ${(data.summary?.totalRevenue || 0).toLocaleString()}\nTotal Items Sold,${data.summary?.totalItems || 0} items\nAverage Sale Value,Rs ${data.summary?.totalItems ? Math.round(data.summary.totalRevenue / data.summary.totalItems).toLocaleString() : 0}\n\n`;
-    csv += 'METAL-WISE PERFORMANCE\n\n';
-    if (data.byMetal?.gold && data.byMetal.gold.totalRevenue > 0) {
-      let goldItemsSold = data.topPerformers ? data.topPerformers.filter(i => i.metalType === 'gold').reduce((s, i) => s + (i.totalItems || 0), 0) : 0;
-      csv += `Gold Sales\nRevenue,Rs ${(data.byMetal.gold.totalRevenue || 0).toLocaleString()}\nGross Weight,${data.byMetal.gold.totalWeight || 0} grams\nPure Weight,${data.byMetal.gold.totalPureWeight || 0} grams\nTotal Items Sold,${goldItemsSold} items\n\n`;
-    }
-    if (data.byMetal?.silver && data.byMetal.silver.totalRevenue > 0) {
-      let silverItemsSold = data.topPerformers ? data.topPerformers.filter(i => i.metalType === 'silver').reduce((s, i) => s + (i.totalItems || 0), 0) : 0;
-      csv += `Silver Sales\nRevenue,Rs ${(data.byMetal.silver.totalRevenue || 0).toLocaleString()}\nGross Weight,${data.byMetal.silver.totalWeight || 0} grams\nPure Weight,${data.byMetal.silver.totalPureWeight || 0} grams\nTotal Items Sold,${silverItemsSold} items\n\n`;
-    }
+    csv += `Generated on,${formatDateObjectForDisplay(new Date())}\n\nTotal Revenue,Rs ${(data.summary?.totalRevenue || 0).toLocaleString()}\nTotal Items Sold,${data.summary?.totalItems || 0} items\n\n`;
     if (data.topPerformers && data.topPerformers.length > 0) {
       csv += 'TOP REVENUE GENERATORS\nRank,Metal Type,Category,Purity (%),Revenue,Gross Weight (g),Pure Weight (g),Items Sold\n';
       [...data.topPerformers].sort((a, b) => (b.totalSalesAmount || 0) - (a.totalSalesAmount || 0)).slice(0, 10).forEach((item, i) => {
@@ -1132,8 +785,8 @@ const ReportPage = () => {
     try {
       const wb = generateSalesExcel(data);
       const date = new Date();
-      const formattedDate = `${String(date.getDate()).padStart(2,'0')}-${String(date.getMonth()+1).padStart(2,'0')}-${date.getFullYear()}`;
-      await saveWorkbook(wb, `sales_report_${formattedDate}.xlsx`);
+      const d = `${String(date.getDate()).padStart(2,'0')}-${String(date.getMonth()+1).padStart(2,'0')}-${date.getFullYear()}`;
+      await saveWorkbook(wb, `sales_report_${d}.xlsx`);
     } catch (error) {
       console.error('Excel Download Error:', error);
       alert('Error generating Excel file');
@@ -1164,7 +817,6 @@ const ReportPage = () => {
     }
   };
 
-  // ── Customer download ─────────────────────────────────────────────────
   const handleCustomerDownload = async (format, customerFields) => {
     try {
       const token = localStorage.getItem('token');
@@ -1177,7 +829,8 @@ const ReportPage = () => {
       if (customerFields.purchaseAmount) fieldsToInclude.push('totalPurchaseAmount');
       if (customerFields.purchaseItems) fieldsToInclude.push('transactions');
       const response = await api.post('/api/reports/download', {
-        reportType: 'customers', format, includeEntries: true, fields: fieldsToInclude,
+        reportType: 'customers', format, includeEntries: true,
+        fields: fieldsToInclude,
         fieldSelection: { includeName: customerFields.name, includeAddress: customerFields.address, includeMobile: customerFields.mobile, includePurchaseAmount: customerFields.purchaseAmount, includePurchaseItems: customerFields.purchaseItems }
       }, { headers: { 'Authorization': `Bearer ${token}` } });
       const data = response.data;
@@ -1188,7 +841,7 @@ const ReportPage = () => {
         if (format === 'pdf') await generateCustomerPDFReport(reportData, filename, customerFields);
         else if (format === 'excel') await generateCustomerExcelReport(reportData, filename, customerFields);
         else if (format === 'csv') await generateCustomerCSVReport(reportData, filename, customerFields);
-        alert(`Customer ${format.toUpperCase()} report downloaded successfully!`);
+        if (!isCapacitorApp()) alert(`Customer ${format.toUpperCase()} report downloaded successfully!`);
         return;
       }
     } catch (error) {
@@ -1204,107 +857,95 @@ const ReportPage = () => {
 
   const formatPurchaseItems = (transactions) => {
     if (!transactions || transactions.length === 0) return 'No purchases';
-    const itemSummary = transactions.reduce((acc, transaction) => {
-      const key = `${transaction.metalType}-${transaction.category}`;
-      if (!acc[key]) acc[key] = { metalType: transaction.metalType, category: transaction.category, count: 0, totalWeight: 0, totalAmount: 0 };
-      acc[key].count += transaction.itemCount || 1;
-      acc[key].totalWeight += transaction.weight || 0;
-      acc[key].totalAmount += transaction.amount || 0;
+    const summary = transactions.reduce((acc, t) => {
+      const key = `${t.metalType}-${t.category}`;
+      if (!acc[key]) acc[key] = { metalType: t.metalType, category: t.category, count: 0, totalWeight: 0 };
+      acc[key].count += t.itemCount || 1;
+      acc[key].totalWeight += t.weight || 0;
       return acc;
     }, {});
-    return Object.values(itemSummary).map(item => `${item.count} ${item.metalType} ${item.category} (${item.totalWeight.toFixed(3)}g)`).join(', ');
+    return Object.values(summary).map(i => `${i.count} ${i.metalType} ${i.category} (${i.totalWeight.toFixed(3)}g)`).join(', ');
   };
 
-  // ── Customer PDF ──────────────────────────────────────────────────────
   const generateCustomerPDFReport = async (reportData, filename, selectedFields) => {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
     let yPosition = 20;
     const pageHeight = doc.internal.pageSize.height;
     const margin = 20;
-
-    const addCustomerText = (text, fontSize = 10) => {
+    const addText = (text, fontSize = 10) => {
       doc.setFontSize(fontSize); doc.setFont("helvetica", "normal");
       doc.text(text, margin, yPosition); yPosition += fontSize + 3;
     };
-    const checkCustomerNewPage = (requiredSpace = 10) => {
-      if (yPosition + requiredSpace > pageHeight - margin) { doc.addPage(); yPosition = 20; }
+    const checkNewPage = (space = 10) => {
+      if (yPosition + space > pageHeight - margin) { doc.addPage(); yPosition = 20; }
     };
-
-    addCustomerText('Customer Report', 16);
-    addCustomerText(`Generated: ${new Date().toLocaleDateString('en-GB')}`, 10);
-    addCustomerText('', 5);
-
+    addText('Customer Report', 16);
+    addText(`Generated: ${new Date().toLocaleDateString('en-GB')}`, 10);
+    addText('', 5);
     if (reportData.customers && reportData.customers.length > 0) {
-      let validCustomerIndex = 0;
+      let idx = 0;
       reportData.customers.forEach((customer) => {
-        let hasAllSelectedFields = true;
-        if (selectedFields.name && !isValidValue(customer.customerName)) hasAllSelectedFields = false;
-        if (selectedFields.mobile && !isValidValue(customer.customerMobile)) hasAllSelectedFields = false;
-        if (selectedFields.address && !isValidValue(customer.customerAddress)) hasAllSelectedFields = false;
-        if (selectedFields.purchaseAmount && (!isValidValue(customer.totalPurchaseAmount) || customer.totalPurchaseAmount <= 0)) hasAllSelectedFields = false;
-        if (selectedFields.purchaseItems && (!customer.transactions || customer.transactions.length === 0)) hasAllSelectedFields = false;
-        if (hasAllSelectedFields) {
-          checkCustomerNewPage(40);
-          validCustomerIndex++;
-          let customerLine = `${validCustomerIndex}. `;
-          let isFirstField = true;
-          if (selectedFields.name) { customerLine += customer.customerName; isFirstField = false; }
-          if (selectedFields.mobile) { customerLine += isFirstField ? customer.customerMobile : ` | ${customer.customerMobile}`; isFirstField = false; }
-          if (selectedFields.address) { customerLine += isFirstField ? customer.customerAddress : ` | ${customer.customerAddress}`; isFirstField = false; }
-          if (selectedFields.purchaseAmount) { customerLine += isFirstField ? `Rs.${customer.totalPurchaseAmount}` : ` | Rs.${customer.totalPurchaseAmount}`; isFirstField = false; }
-          addCustomerText(customerLine, 10);
-          if (selectedFields.purchaseItems && customer.transactions) addCustomerText(`   Items: ${formatPurchaseItems(customer.transactions)}`, 9);
-          addCustomerText('', 3);
+        let valid = true;
+        if (selectedFields.name && !isValidValue(customer.customerName)) valid = false;
+        if (selectedFields.mobile && !isValidValue(customer.customerMobile)) valid = false;
+        if (selectedFields.address && !isValidValue(customer.customerAddress)) valid = false;
+        if (selectedFields.purchaseAmount && (!isValidValue(customer.totalPurchaseAmount) || customer.totalPurchaseAmount <= 0)) valid = false;
+        if (selectedFields.purchaseItems && (!customer.transactions || customer.transactions.length === 0)) valid = false;
+        if (valid) {
+          checkNewPage(40); idx++;
+          let line = `${idx}. `;
+          let first = true;
+          if (selectedFields.name) { line += customer.customerName; first = false; }
+          if (selectedFields.mobile) { line += first ? customer.customerMobile : ` | ${customer.customerMobile}`; first = false; }
+          if (selectedFields.address) { line += first ? customer.customerAddress : ` | ${customer.customerAddress}`; first = false; }
+          if (selectedFields.purchaseAmount) { line += first ? `Rs.${customer.totalPurchaseAmount}` : ` | Rs.${customer.totalPurchaseAmount}`; }
+          addText(line, 10);
+          if (selectedFields.purchaseItems && customer.transactions) addText(`   Items: ${formatPurchaseItems(customer.transactions)}`, 9);
+          addText('', 3);
         }
       });
     }
     await saveDoc(doc, filename);
   };
 
-  // ── Customer Excel ────────────────────────────────────────────────────
   const generateCustomerExcelReport = async (reportData, filename, selectedFields) => {
     const XLSX = window.XLSX;
-    const workbook = XLSX.utils.book_new();
-    const customerHeaders = [];
-    if (selectedFields.name) customerHeaders.push('Customer Name');
-    if (selectedFields.mobile) customerHeaders.push('Mobile Number');
-    if (selectedFields.address) customerHeaders.push('Address');
-    if (selectedFields.purchaseAmount) customerHeaders.push('Total Purchase Amount (₹)');
-    if (selectedFields.purchaseItems) customerHeaders.push('Purchase Items Details');
-
-    const validCustomers = reportData.customers.filter(customer => {
-      if (selectedFields.name && !isValidValue(customer.customerName)) return false;
-      if (selectedFields.mobile && !isValidValue(customer.customerMobile)) return false;
-      if (selectedFields.address && !isValidValue(customer.customerAddress)) return false;
-      if (selectedFields.purchaseAmount && (!isValidValue(customer.totalPurchaseAmount) || customer.totalPurchaseAmount <= 0)) return false;
-      if (selectedFields.purchaseItems && (!customer.transactions || customer.transactions.length === 0)) return false;
+    const wb = XLSX.utils.book_new();
+    const headers = [];
+    if (selectedFields.name) headers.push('Customer Name');
+    if (selectedFields.mobile) headers.push('Mobile Number');
+    if (selectedFields.address) headers.push('Address');
+    if (selectedFields.purchaseAmount) headers.push('Total Purchase Amount (₹)');
+    if (selectedFields.purchaseItems) headers.push('Purchase Items Details');
+    const rows = reportData.customers.filter(c => {
+      if (selectedFields.name && !isValidValue(c.customerName)) return false;
+      if (selectedFields.mobile && !isValidValue(c.customerMobile)) return false;
+      if (selectedFields.address && !isValidValue(c.customerAddress)) return false;
+      if (selectedFields.purchaseAmount && (!isValidValue(c.totalPurchaseAmount) || c.totalPurchaseAmount <= 0)) return false;
+      if (selectedFields.purchaseItems && (!c.transactions || c.transactions.length === 0)) return false;
       return true;
-    });
-
-    const customerRows = validCustomers.map(customer => {
+    }).map(c => {
       const row = [];
-      if (selectedFields.name) row.push(customer.customerName);
-      if (selectedFields.mobile) row.push(customer.customerMobile);
-      if (selectedFields.address) row.push(customer.customerAddress);
-      if (selectedFields.purchaseAmount) row.push(customer.totalPurchaseAmount);
-      if (selectedFields.purchaseItems) row.push(formatPurchaseItems(customer.transactions));
+      if (selectedFields.name) row.push(c.customerName);
+      if (selectedFields.mobile) row.push(c.customerMobile);
+      if (selectedFields.address) row.push(c.customerAddress);
+      if (selectedFields.purchaseAmount) row.push(c.totalPurchaseAmount);
+      if (selectedFields.purchaseItems) row.push(formatPurchaseItems(c.transactions));
       return row;
     });
-
-    const customerSheet = XLSX.utils.aoa_to_sheet([customerHeaders, ...customerRows]);
-    const columnWidths = [];
-    if (selectedFields.name) columnWidths.push({ wch: 25 });
-    if (selectedFields.mobile) columnWidths.push({ wch: 15 });
-    if (selectedFields.address) columnWidths.push({ wch: 30 });
-    if (selectedFields.purchaseAmount) columnWidths.push({ wch: 20 });
-    if (selectedFields.purchaseItems) columnWidths.push({ wch: 50 });
-    customerSheet['!cols'] = columnWidths;
-    XLSX.utils.book_append_sheet(workbook, customerSheet, 'Customer Report');
-    await saveWorkbook(workbook, filename);
+    const sheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    const colWidths = [];
+    if (selectedFields.name) colWidths.push({ wch: 25 });
+    if (selectedFields.mobile) colWidths.push({ wch: 15 });
+    if (selectedFields.address) colWidths.push({ wch: 30 });
+    if (selectedFields.purchaseAmount) colWidths.push({ wch: 20 });
+    if (selectedFields.purchaseItems) colWidths.push({ wch: 50 });
+    sheet['!cols'] = colWidths;
+    XLSX.utils.book_append_sheet(wb, sheet, 'Customer Report');
+    await saveWorkbook(wb, filename);
   };
 
-  // ── Customer CSV ──────────────────────────────────────────────────────
   const generateCustomerCSVReport = async (reportData, filename, selectedFields) => {
     const headers = [];
     if (selectedFields.name) headers.push('Customer Name');
@@ -1312,29 +953,26 @@ const ReportPage = () => {
     if (selectedFields.address) headers.push('Address');
     if (selectedFields.purchaseAmount) headers.push('Total Purchase Amount (₹)');
     if (selectedFields.purchaseItems) headers.push('Purchase Items Details');
-
-    let csvContent = headers.join(',') + '\n';
-
-    if (reportData.customers && reportData.customers.length > 0) {
-      reportData.customers.filter(customer => {
-        if (selectedFields.name && !isValidValue(customer.customerName)) return false;
-        if (selectedFields.mobile && !isValidValue(customer.customerMobile)) return false;
-        if (selectedFields.address && !isValidValue(customer.customerAddress)) return false;
-        if (selectedFields.purchaseAmount && (!isValidValue(customer.totalPurchaseAmount) || customer.totalPurchaseAmount <= 0)) return false;
-        if (selectedFields.purchaseItems && (!customer.transactions || customer.transactions.length === 0)) return false;
+    let csv = headers.join(',') + '\n';
+    if (reportData.customers) {
+      reportData.customers.filter(c => {
+        if (selectedFields.name && !isValidValue(c.customerName)) return false;
+        if (selectedFields.mobile && !isValidValue(c.customerMobile)) return false;
+        if (selectedFields.address && !isValidValue(c.customerAddress)) return false;
+        if (selectedFields.purchaseAmount && (!isValidValue(c.totalPurchaseAmount) || c.totalPurchaseAmount <= 0)) return false;
+        if (selectedFields.purchaseItems && (!c.transactions || c.transactions.length === 0)) return false;
         return true;
-      }).forEach(customer => {
+      }).forEach(c => {
         const row = [];
-        if (selectedFields.name) row.push(`"${customer.customerName}"`);
-        if (selectedFields.mobile) row.push(`"${customer.customerMobile}"`);
-        if (selectedFields.address) row.push(`"${customer.customerAddress}"`);
-        if (selectedFields.purchaseAmount) row.push(customer.totalPurchaseAmount);
-        if (selectedFields.purchaseItems) row.push(`"${formatPurchaseItems(customer.transactions)}"`);
-        csvContent += row.join(',') + '\n';
+        if (selectedFields.name) row.push(`"${c.customerName}"`);
+        if (selectedFields.mobile) row.push(`"${c.customerMobile}"`);
+        if (selectedFields.address) row.push(`"${c.customerAddress}"`);
+        if (selectedFields.purchaseAmount) row.push(c.totalPurchaseAmount);
+        if (selectedFields.purchaseItems) row.push(`"${formatPurchaseItems(c.transactions)}"`);
+        csv += row.join(',') + '\n';
       });
     }
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     await downloadFile(blob, filename.replace('.xlsx', '.csv'));
   };
 
@@ -1355,7 +993,7 @@ const ReportPage = () => {
     </div>
   );
 
-return (
+  return (
   <div className="w-full min-h-screen bg-gray-50 dark:bg-gray-900">
     <div className="w-full max-w-7xl mx-auto px-2 sm:px-4 md:px-6 lg:px-8 py-3 sm:py-4 md:py-6 lg:py-8 space-y-3 sm:space-y-4 md:space-y-6 lg:space-y-8">
       
@@ -2456,8 +2094,6 @@ return (
     </div>
   </div>
 );
-
-
 };
 
 export default ReportPage;
