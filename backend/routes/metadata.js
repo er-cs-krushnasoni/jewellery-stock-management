@@ -11,12 +11,25 @@ const calcPure = (gross, purity) => +(gross * (purity / 100)).toFixed(3);
 const rebuildMetadataFromEntries = async (userId) => {
   try {
     console.log("🔍 rebuildMetadataFromEntries called for userId:", userId);
-    
+
     const Entry = require("../models/Entry");
     const entries = await Entry.find({ userId });
     console.log("🔍 Found", entries.length, "entries for user");
 
-    // Start fresh - don't preserve old structure
+    // FIX: Load existing metadata first so we can preserve empty categories
+    let existingCategoryTotals = {};
+    try {
+      const existingMetadata = await Metadata.findOne({ userId });
+      if (existingMetadata && existingMetadata.data) {
+        const existing = decryptData(existingMetadata.data);
+        existingCategoryTotals = existing.categoryTotals || {};
+        console.log("🔍 Loaded existing metadata with", Object.keys(existingCategoryTotals).length, "categories");
+      }
+    } catch (err) {
+      console.warn("⚠️ Could not load existing metadata for preservation, starting fresh:", err.message);
+    }
+
+    // Start with a fresh metadata object
     const metadata = {
       totalGoldGross: 0,
       totalGoldPure: 0,
@@ -25,19 +38,41 @@ const rebuildMetadataFromEntries = async (userId) => {
       categoryTotals: {}
     };
 
-    // Process entries and build metadata
+    // FIX: Seed categoryTotals with all existing empty categories BEFORE processing entries.
+    // This ensures categories with no entries are not wiped on rebuild.
+    for (const categoryKey in existingCategoryTotals) {
+      const existing = existingCategoryTotals[categoryKey];
+      metadata.categoryTotals[categoryKey] = {
+        grossWeight: 0,
+        pureWeight: 0,
+        totalItems: 0,
+        purities: {},
+        metal: existing.metal,
+        categoryName: existing.categoryName
+      };
+
+      // Also seed existing empty purities within each category
+      for (const purityKey in existing.purities || {}) {
+        metadata.categoryTotals[categoryKey].purities[purityKey] = {
+          grossWeight: 0,
+          pureWeight: 0,
+          totalItems: 0
+        };
+      }
+      console.log(`🌱 Seeded existing category: ${categoryKey}`);
+    }
+
+    // Process entries and accumulate into metadata
     for (let i = 0; i < entries.length; i++) {
       const encEntry = entries[i];
       console.log(`🔍 Processing entry ${i + 1}/${entries.length}`);
-      
+
       try {
-        // Decrypt using new format only
         const entry = decryptData(encEntry.data);
         console.log("🔍 Decrypted entry data:", entry);
-        
+
         const { metalType, category, purity, weight, isBulk, itemCount } = entry;
 
-        // Validate data types
         if (
           typeof weight !== 'number' || isNaN(weight) ||
           typeof purity !== 'number' || isNaN(purity)
@@ -49,12 +84,11 @@ const rebuildMetadataFromEntries = async (userId) => {
         const pure = calcPure(weight, purity);
         const items = isBulk ? (itemCount || 1) : 1;
 
-        console.log(`🔍 Entry processing: metalType=${metalType}, category=${category}, weight=${weight}, pure=${pure}`);
+        console.log(`🔍 Entry: metalType=${metalType}, category=${category}, weight=${weight}, pure=${pure}`);
 
-        // Use composite key "category_metalType" to separate gold and silver of same category
         const categoryKey = `${category}_${metalType}`;
-        
-        // Initialize category if doesn't exist
+
+        // Initialize category if it doesn't exist yet (new category from entry)
         if (!metadata.categoryTotals[categoryKey]) {
           metadata.categoryTotals[categoryKey] = {
             grossWeight: 0,
@@ -64,35 +98,30 @@ const rebuildMetadataFromEntries = async (userId) => {
             metal: metalType,
             categoryName: category
           };
-          console.log(`🔥 Initialized new category: ${categoryKey}`);
+          console.log(`🔥 Initialized new category from entry: ${categoryKey}`);
         }
 
         const cat = metadata.categoryTotals[categoryKey];
         const purityKey = purity.toString();
 
-        // Initialize purity if doesn't exist
         if (!cat.purities[purityKey]) {
           cat.purities[purityKey] = {
             grossWeight: 0,
             pureWeight: 0,
             totalItems: 0
           };
-          console.log(`🔥 Initialized new purity ${purityKey}% for category ${categoryKey}`);
         }
 
         const pur = cat.purities[purityKey];
 
-        // Update category totals
         cat.grossWeight += weight;
         cat.pureWeight += pure;
         cat.totalItems += items;
 
-        // Update purity totals
         pur.grossWeight += weight;
         pur.pureWeight += pure;
         pur.totalItems += items;
 
-        // Update metal totals
         if (metalType === "gold") {
           metadata.totalGoldGross += weight;
           metadata.totalGoldPure += pure;
@@ -107,41 +136,29 @@ const rebuildMetadataFromEntries = async (userId) => {
       }
     }
 
-    // Round all values to 3 decimal places
+    // Round top-level totals
     metadata.totalGoldGross = +metadata.totalGoldGross.toFixed(3);
     metadata.totalGoldPure = +metadata.totalGoldPure.toFixed(3);
     metadata.totalSilverGross = +metadata.totalSilverGross.toFixed(3);
     metadata.totalSilverPure = +metadata.totalSilverPure.toFixed(3);
 
-    // Clean up and round category/purity values
+    // Round category/purity values but DO NOT delete empty categories/purities —
+    // they were intentionally created by the user and must be preserved.
     for (let categoryKey in metadata.categoryTotals) {
       const cat = metadata.categoryTotals[categoryKey];
       cat.grossWeight = +cat.grossWeight.toFixed(3);
       cat.pureWeight = +cat.pureWeight.toFixed(3);
-      
-      // Clean up empty purities within categories
+
       for (let purityKey in cat.purities) {
         const pur = cat.purities[purityKey];
         pur.grossWeight = +pur.grossWeight.toFixed(3);
         pur.pureWeight = +pur.pureWeight.toFixed(3);
-        
-        // Remove purity if it has no items
-        if (pur.totalItems === 0 && pur.grossWeight === 0 && pur.pureWeight === 0) {
-          console.log(`🧹 Removing empty purity ${purityKey}% from category ${categoryKey}`);
-          delete cat.purities[purityKey];
-        }
-      }
-      
-      // Remove category if it has no items and no purities
-      if (cat.totalItems === 0 && cat.grossWeight === 0 && Object.keys(cat.purities).length === 0) {
-        console.log(`🧹 Removing empty category ${categoryKey}`);
-        delete metadata.categoryTotals[categoryKey];
       }
     }
 
     console.log("🔥 Final metadata structure:", metadata);
-    console.log("📊 Categories after cleanup:", Object.keys(metadata.categoryTotals).length);
-    
+    console.log("📊 Total categories (including empty):", Object.keys(metadata.categoryTotals).length);
+
     return metadata;
   } catch (error) {
     console.error("❌ Error rebuilding metadata:", error);
@@ -153,7 +170,7 @@ const rebuildMetadataFromEntries = async (userId) => {
 const saveMetadata = async (userId, metadataObj) => {
   try {
     const encryptedData = encryptData(metadataObj);
-    
+
     await Metadata.findOneAndUpdate(
       { userId },
       {
@@ -162,7 +179,6 @@ const saveMetadata = async (userId, metadataObj) => {
       },
       { upsert: true, new: true }
     );
-
     console.log(`✅ Metadata saved for user ${userId}`);
     return metadataObj;
   } catch (error) {
@@ -188,7 +204,7 @@ router.get("/", requireAuth, async (req, res) => {
   try {
     const userId = req.userId;
     const metadata = await Metadata.findOne({ userId });
-    
+
     if (!metadata) {
       console.log("🔍 No metadata found, returning default structure");
       return res.json({
@@ -200,21 +216,18 @@ router.get("/", requireAuth, async (req, res) => {
       });
     }
 
-    // Try to decrypt the metadata
     let decryptedData;
     try {
       decryptedData = decryptData(metadata.data);
       console.log("🔍 Successfully decrypted metadata");
     } catch (decryptError) {
       console.error("❌ Failed to decrypt metadata, rebuilding...", decryptError);
-      
-      // If decryption fails, rebuild metadata from entries
+
       try {
         decryptedData = await updateMetadata(userId);
         console.log("🔍 Successfully rebuilt metadata");
       } catch (rebuildError) {
         console.error("❌ Failed to rebuild metadata:", rebuildError);
-        // Return default values if everything fails
         return res.json({
           totalGoldGross: 0,
           totalGoldPure: 0,
@@ -224,8 +237,7 @@ router.get("/", requireAuth, async (req, res) => {
         });
       }
     }
-    
-    // Return the metadata in the expected format
+
     console.log("🔍 Returning metadata to frontend:", {
       totalGoldGross: decryptedData.totalGoldGross || 0,
       totalGoldPure: decryptedData.totalGoldPure || 0,
@@ -252,10 +264,10 @@ router.post("/rebuild", requireAuth, async (req, res) => {
   try {
     const userId = req.userId;
     console.log("🔍 Rebuilding metadata for user:", userId);
-    
+
     const rebuiltData = await updateMetadata(userId);
-    
-    res.json({ 
+
+    res.json({
       message: "Metadata rebuilt successfully",
       stats: {
         totalGoldGross: rebuiltData.totalGoldGross,
@@ -267,9 +279,9 @@ router.post("/rebuild", requireAuth, async (req, res) => {
     });
   } catch (err) {
     console.error("❌ Rebuild metadata error:", err);
-    res.status(500).json({ 
-      error: "Failed to rebuild metadata", 
-      details: err.message 
+    res.status(500).json({
+      error: "Failed to rebuild metadata",
+      details: err.message
     });
   }
 });
@@ -279,23 +291,21 @@ router.post("/cleanup", requireAuth, async (req, res) => {
   try {
     const userId = req.userId;
     console.log("🔍 Cleaning up metadata for user:", userId);
-    
-    // Delete any existing metadata
+
     await Metadata.deleteMany({ userId });
     console.log("🔍 Deleted existing metadata");
-    
-    // Rebuild from entries
+
     const rebuiltData = await updateMetadata(userId);
-    
-    res.json({ 
+
+    res.json({
       message: "Metadata cleaned up and rebuilt successfully",
       data: rebuiltData
     });
   } catch (err) {
     console.error("❌ Cleanup error:", err);
-    res.status(500).json({ 
-      error: "Failed to cleanup metadata", 
-      details: err.message 
+    res.status(500).json({
+      error: "Failed to cleanup metadata",
+      details: err.message
     });
   }
 });
