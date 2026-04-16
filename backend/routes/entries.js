@@ -71,10 +71,12 @@ router.post("/", requireAuth, async (req, res) => {
     if (isBulk) {
       console.log("🔍 Processing bulk entry...");
       const entries = await Entry.find({ userId });
+
       for (let e of entries) {
         try {
           const d = decryptData(e.data);
           console.log("🔍 Checking existing entry:", d);
+
           if (
             d.metalType === entryData.metalType &&
             d.category === entryData.category &&
@@ -151,6 +153,7 @@ router.get("/", requireAuth, async (req, res) => {
   try {
     const userId = req.userId;
     const { metalType, category, purity, minWeight, maxWeight, useGrossWeight = 'true', sortBy = 'createdAt' } = req.query;
+
     const entries = await Entry.find({ userId }).sort({ createdAt: -1 });
     
     let decrypted = [];
@@ -246,7 +249,9 @@ router.put("/:id", requireAuth, async (req, res) => {
   try {
     const userId = req.userId;
     const entryId = req.params.id;
-    const { weight, itemCount, purity, notes } = req.body;
+
+    // ✅ FIX: destructure metalType and category alongside the other fields
+    const { weight, itemCount, purity, notes, metalType, category } = req.body;
 
     const entry = await Entry.findOne({ _id: entryId, userId });
     if (!entry) {
@@ -261,8 +266,24 @@ router.put("/:id", requireAuth, async (req, res) => {
       console.error(`❌ Failed to decrypt entry ${entryId}:`, decryptError);
       return res.status(500).json({ error: "Failed to decrypt entry data" });
     }
-    
-    // Update fields if provided
+
+    // ✅ FIX: Update metalType if provided
+    if (metalType !== undefined) {
+      if (!["gold", "silver"].includes(metalType.toLowerCase())) {
+        return res.status(400).json({ error: "Metal type must be 'gold' or 'silver'" });
+      }
+      decryptedData.metalType = metalType.toLowerCase();
+    }
+
+    // ✅ FIX: Update category if provided
+    if (category !== undefined) {
+      if (typeof category !== "string" || category.trim().length === 0) {
+        return res.status(400).json({ error: "Category must be a non-empty string" });
+      }
+      decryptedData.category = category.trim();
+    }
+
+    // Update weight if provided
     if (weight !== undefined) {
       if (typeof weight !== 'number' || weight <= 0) {
         return res.status(400).json({ error: "Weight must be a positive number" });
@@ -270,6 +291,7 @@ router.put("/:id", requireAuth, async (req, res) => {
       decryptedData.weight = +weight;
     }
 
+    // Update itemCount if provided (bulk only)
     if (itemCount !== undefined && decryptedData.isBulk) {
       if (typeof itemCount !== 'number' || itemCount <= 0) {
         return res.status(400).json({ error: "Item count must be a positive number" });
@@ -277,6 +299,7 @@ router.put("/:id", requireAuth, async (req, res) => {
       decryptedData.itemCount = +itemCount;
     }
 
+    // Update purity if provided
     if (purity !== undefined) {
       if (typeof purity !== 'number' || purity < 0 || purity > 100) {
         return res.status(400).json({ error: "Purity must be between 0-100%" });
@@ -284,6 +307,7 @@ router.put("/:id", requireAuth, async (req, res) => {
       decryptedData.purity = +purity;
     }
 
+    // Update notes if provided
     if (notes !== undefined) {
       if (notes !== null && typeof notes !== 'string') {
         return res.status(400).json({ error: "Notes must be a string" });
@@ -402,6 +426,7 @@ router.post("/remove-item", requireAuth, async (req, res) => {
               entry.data = encryptData(data);
               await entry.save();
             }
+
             removed = true;
             break;
           }
@@ -420,6 +445,7 @@ router.post("/remove-item", requireAuth, async (req, res) => {
     }
 
     await updateMetadata(userId);
+
     res.json({ 
       message: "Item removed successfully",
       removed: true 
