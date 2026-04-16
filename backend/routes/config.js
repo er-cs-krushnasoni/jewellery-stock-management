@@ -1,6 +1,5 @@
 const express = require("express");
 const router = express.Router();
-
 const Entry = require("../models/Entry");
 const Metadata = require("../models/Metadata");
 const { decryptData, encryptData } = require("../utils/encrypt");
@@ -311,7 +310,6 @@ router.post("/categories/rename", requireAuth, async (req, res) => {
       }
     }
     console.log("✅ Updated", updatedEntries, "entries");
-
     // ✅ FIX: Manually rename the category key in metadata BEFORE rebuilding.
     // This handles categories with 0 entries — rebuildMetadataFromEntries only
     // creates new category keys from entries, so an empty category would vanish
@@ -325,11 +323,9 @@ router.post("/categories/rename", requireAuth, async (req, res) => {
       await saveEncryptedMetadata(userId, currentMetadata);
       console.log("✅ Manually renamed category key in metadata");
     }
-
     // Rebuild metadata from entries to ensure consistency
     console.log("🔄 Rebuilding metadata...");
     await updateMetadata(userId);
-
     // Verify the update worked
     const verifyMetadata = await getDecryptedMetadata(userId);
     const newCategoryExists = !!verifyMetadata.categoryTotals[newCategoryKey];
@@ -420,6 +416,19 @@ router.post("/purities/update", requireAuth, async (req, res) => {
       }
     }
     console.log(`✅ Updated ${updatedEntries} entries with new purity`);
+
+    // ✅ FIX: Remove the old purity key from metadata BEFORE calling updateMetadata.
+    // rebuildMetadataFromEntries seeds all existing purity keys from the current
+    // metadata snapshot, so without this step the renamed-away key (e.g. "3") gets
+    // re-planted as an empty ghost entry alongside the new key (e.g. "10").
+    const preRebuildMeta = await getDecryptedMetadata(userId);
+    const categoryKeyPre = `${categoryName}_${metalType.toLowerCase()}`;
+    if (preRebuildMeta.categoryTotals?.[categoryKeyPre]?.purities) {
+      delete preRebuildMeta.categoryTotals[categoryKeyPre].purities[oldPurity.toString()];
+      await saveEncryptedMetadata(userId, preRebuildMeta);
+      console.log(`🗑️ Pre-deleted old purity key "${oldPurity}" from metadata before rebuild`);
+    }
+
     // Rebuild metadata from entries to recalculate all totals
     console.log("🔄 Rebuilding metadata with recalculated values...");
     await updateMetadata(userId);
