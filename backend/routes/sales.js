@@ -512,17 +512,42 @@ router.get("/customers/search", async (req, res) => {
   }
 });
 
-// PUT /api/sales/:id - Edit sale (price and customer info only)
+// PUT /api/sales/:id - Edit sale (ALL fields now editable)
 router.put("/:id", async (req, res) => {
   try {
-    const { salesPrice, customerName, customerAddress, customerMobile } = req.body;
+    const {
+      metalType,
+      category,
+      purity,
+      weight,
+      salesPrice,
+      isBulk,
+      itemCount,
+      customerName,
+      customerAddress,
+      customerMobile,
+      description
+    } = req.body;
 
+    // Validate required fields
     if (!salesPrice || salesPrice <= 0) {
       return res.status(400).json({ message: "Valid sales price is required" });
     }
+    if (!metalType || !category || !purity || !weight) {
+      return res.status(400).json({ message: "metalType, category, purity, and weight are required" });
+    }
+    if (parseFloat(weight) <= 0) {
+      return res.status(400).json({ message: "Weight must be greater than 0" });
+    }
+    const normalizedMetalType = metalType.toLowerCase();
+    if (!['gold', 'silver'].includes(normalizedMetalType)) {
+      return res.status(400).json({ message: "Metal type must be 'gold' or 'silver'" });
+    }
+    if (isBulk && (!itemCount || itemCount <= 0)) {
+      return res.status(400).json({ message: "Item count is required for bulk sales" });
+    }
 
     const sale = await Sales.findOne({ _id: req.params.id, userId: req.userId });
-
     if (!sale) {
       return res.status(404).json({ message: "Sale not found" });
     }
@@ -530,25 +555,27 @@ router.put("/:id", async (req, res) => {
     // Decrypt existing data
     const existingData = decryptData(sale.data);
 
-    // Update only allowed fields
+    // Merge all fields
     const updatedData = {
       ...existingData,
-      salesPrice,
+      metalType: normalizedMetalType,
+      category,
+      purity: parseFloat(purity),
+      weight: parseFloat(weight),
+      salesPrice: parseFloat(salesPrice),
+      isBulk: !!isBulk,
+      itemCount: isBulk ? parseInt(itemCount) : undefined,
       customerName: customerName || '',
       customerAddress: customerAddress || '',
-      customerMobile: customerMobile || ''
+      customerMobile: customerMobile || '',
+      description: description || ''
     };
 
-    // Encrypt updated data
-    const encryptedData = encryptData(updatedData);
-
-    // Update sale
-    sale.data = encryptedData;
-    sale.soldAt = new Date(); // Update timestamp
-
+    // Encrypt and save
+    sale.data = encryptData(updatedData);
     await sale.save();
 
-    // Return decrypted sale data for response
+    // Return decrypted sale
     const decryptedSale = decryptSalesData(sale.toObject());
     delete decryptedSale.encryptedData;
 
@@ -556,7 +583,6 @@ router.put("/:id", async (req, res) => {
       message: "Sale updated successfully",
       sale: decryptedSale
     });
-
   } catch (error) {
     console.error("Error updating sale:", error);
     res.status(500).json({ message: "Internal server error", error: error.message });
