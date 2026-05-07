@@ -32,7 +32,9 @@ JEWELLERY-STOCK-MANAGEMENT-APP/
 ├── frontend/
 │   ├── node_modules/
 │   ├── public/
-│   │   └── vite.svg
+│   │   ├── vite.svg
+│   │   ├── fonts/
+│   │   │   └── NotoSansAllIndic.ttf
 │   ├── plugins/
 │   │   └── silentViteClient.js
 │   ├── src/

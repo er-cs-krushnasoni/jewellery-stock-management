@@ -10,7 +10,6 @@ import { Select } from "../components/ui/select";
 import { useTranslation } from "react-i18next";
 import { Settings, Plus, Trash2, Edit2, Package } from "lucide-react";
 import BackButton from "@/components/ui/BackButton";
-
 export default function PurityPage() {
   const { metal, category } = useParams();
   const [purities, setPurities] = useState([]);
@@ -28,13 +27,14 @@ export default function PurityPage() {
     purity: '',
     isBulk: false,
     quantity: 1,
-    notes: '' // Added notes field
+    notes: ''
   });
   const [submitting, setSubmitting] = useState(false);
+  // ✅ NEW: Loading state for config modal operations (add/edit/delete purity)
+  const [configLoading, setConfigLoading] = useState(false);
   
   const navigate = useNavigate();
   const { t } = useTranslation();
-
   const fetchPurities = async () => {
     try {
       const token = localStorage.getItem("token");
@@ -79,27 +79,20 @@ export default function PurityPage() {
       console.log("🔍 PurityPage - Parsed purities:", parsed);
       setPurities(parsed);
       
-      // Set default purity for add item form if not set and purities exist
-      if (parsed.length > 0 && (!addItemForm.purity || addItemForm.purity === '')) {
-        setAddItemForm(prev => ({ ...prev, purity: parsed[0].purity }));
-      }
     } catch (err) {
       console.error("❌ Error fetching purities:", err);
     } finally {
       setLoading(false);
     }
   };
-
   useEffect(() => {
     fetchPurities();
   }, [category, metal]);
-
   const handleClick = (purity) => {
     console.log("handleClick called with:", purity);
     console.log("Navigating to:", `/${metal}/${category}/${purity}`);
     navigate(`/${metal}/${category}/${purity}`);
   };
-
   const handleAddPurity = async () => {
     try {
       const purityValue = parseFloat(newPurity);
@@ -107,6 +100,8 @@ export default function PurityPage() {
         alert(t('Purity must be a number between 0-100%'));
         return;
       }
+      // ✅ Set loader
+      setConfigLoading(true);
       const token = localStorage.getItem("token");
       await api.post(
         `/api/config/purities`,
@@ -125,9 +120,11 @@ export default function PurityPage() {
     } catch (err) {
       console.error("Error adding purity:", err);
       alert(err.response?.data?.error || t('Error adding purity level'));
+    } finally {
+      // ✅ Clear loader
+      setConfigLoading(false);
     }
   };
-
   const handleEditPurity = async () => {
     try {
       const oldPurityValue = parseFloat(editPurity);
@@ -137,6 +134,8 @@ export default function PurityPage() {
         alert(t('Purity must be a number between 0-100%'));
         return;
       }
+      // ✅ Set loader
+      setConfigLoading(true);
       const token = localStorage.getItem("token");
       
       console.log("🔄 Editing purity:", {
@@ -164,11 +163,15 @@ export default function PurityPage() {
     } catch (err) {
       console.error("Error updating purity:", err);
       alert(err.response?.data?.error || t('Error updating purity level'));
+    } finally {
+      // ✅ Clear loader
+      setConfigLoading(false);
     }
   };
-
   const handleDeletePurity = async (purity) => {
     try {
+      // ✅ Set loader
+      setConfigLoading(true);
       const purityValue = parseFloat(purity);
       const token = localStorage.getItem("token");
       
@@ -194,14 +197,15 @@ export default function PurityPage() {
     } catch (err) {
       console.error("Error deleting purity:", err);
       alert(err.response?.data?.error || t('Error deleting purity level'));
+    } finally {
+      // ✅ Clear loader
+      setConfigLoading(false);
     }
   };
-
   const startEdit = (purity) => {
     setEditPurity(purity);
     setEditValue(purity);
   };
-
   const handleAddItemFormChange = (field, value) => {
     setAddItemForm(prev => {
       const updated = { ...prev, [field]: value };
@@ -218,17 +222,15 @@ export default function PurityPage() {
       return updated;
     });
   };
-
   const resetAddItemForm = () => {
     setAddItemForm({
       weight: '',
-      purity: purities.length > 0 ? purities[0].purity : '',
+      purity: '',
       isBulk: false,
       quantity: 1,
-      notes: '' // Reset notes as well
+      notes: ''
     });
   };
-
   const handleAddItem = async () => {
     try {
       setSubmitting(true);
@@ -303,18 +305,9 @@ export default function PurityPage() {
       setSubmitting(false);
     }
   };
-
   const openAddItemModal = () => {
-    // Ensure we have the latest purities before opening modal
-    if (purities.length > 0) {
-      setAddItemForm(prev => ({
-        ...prev,
-        purity: prev.purity || purities[0].purity
-      }));
-    }
     setIsAddItemOpen(true);
   };
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800">
       <div className="max-w-7xl mx-auto p-4 lg:p-6 space-y-6">
@@ -439,10 +432,8 @@ export default function PurityPage() {
             resetAddItemForm();
           }}
           title={t("Add New Item")}
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50"
         >
-          <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-gray-200/50 p-6 max-w-md w-full max-h-[90vh] overflow-y-auto dark:bg-gray-800/95 dark:border-gray-700/50">
-            <div className="space-y-6">
+          <div className="space-y-6">
               {/* Weight Input */}
               <div>
                 <label className="block text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2">
@@ -598,7 +589,6 @@ export default function PurityPage() {
                 </button>
               </div>
             </div>
-          </div>
         </Modal>
   
         {/* Purity Config Modal */}
@@ -606,10 +596,8 @@ export default function PurityPage() {
           isOpen={isConfigOpen}
           onClose={() => setIsConfigOpen(false)}
           title={t("Manage Purities")}
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50"
         >
-          <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-gray-200/50 p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto dark:bg-gray-800/95 dark:border-gray-700/50">
-            <div className="space-y-6">
+          <div className="space-y-6">
               {/* Add New Purity */}
               <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4">
                 <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4">
@@ -624,13 +612,20 @@ export default function PurityPage() {
                     min="0"
                     max="100"
                     step="0.1"
-                    className="flex-1 px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all duration-200 bg-white/50 backdrop-blur-sm placeholder-gray-500 text-gray-900 dark:bg-gray-800/50 dark:border-gray-600 dark:text-gray-100 dark:placeholder-gray-400"
+                    disabled={configLoading}
+                    className="flex-1 px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all duration-200 bg-white/50 backdrop-blur-sm placeholder-gray-500 text-gray-900 dark:bg-gray-800/50 dark:border-gray-600 dark:text-gray-100 dark:placeholder-gray-400 disabled:opacity-60 disabled:cursor-not-allowed"
                   />
+                  {/* ✅ Add purity button with spinner */}
                   <button
                     onClick={handleAddPurity}
-                    className="px-4 py-3 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white font-medium rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105"
+                    disabled={configLoading}
+                    className="px-4 py-3 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white font-medium rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none"
                   >
-                    <Plus size={20} />
+                    {configLoading ? (
+                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <Plus size={20} />
+                    )}
                   </button>
                 </div>
               </div>
@@ -666,15 +661,19 @@ export default function PurityPage() {
                             </div>
                           </div>
                           <div className="flex gap-2">
+                            {/* ✅ Edit button disabled during any config operation */}
                             <button
                               onClick={() => startEdit(p.purity)}
-                              className="p-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-all duration-200 dark:text-blue-400 dark:hover:text-blue-300 dark:hover:bg-blue-900/30"
+                              disabled={configLoading}
+                              className="p-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-all duration-200 dark:text-blue-400 dark:hover:text-blue-300 dark:hover:bg-blue-900/30 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                               <Edit2 size={16} />
                             </button>
+                            {/* ✅ Delete button disabled during any config operation */}
                             <button
                               onClick={() => setDeleteConfirm(p.purity)}
-                              className="p-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-all duration-200 dark:text-red-400 dark:hover:text-red-300 dark:hover:bg-red-900/30"
+                              disabled={configLoading}
+                              className="p-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-all duration-200 dark:text-red-400 dark:hover:text-red-300 dark:hover:bg-red-900/30 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                               <Trash2 size={16} />
                             </button>
@@ -686,7 +685,6 @@ export default function PurityPage() {
                 )}
               </div>
             </div>
-          </div>
         </Modal>
   
         {/* Edit Purity Modal */}
@@ -697,10 +695,8 @@ export default function PurityPage() {
             setEditValue('');
           }}
           title={t("Edit Purity Level")}
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50"
         >
-          <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-gray-200/50 p-6 max-w-md w-full dark:bg-gray-800/95 dark:border-gray-700/50">
-            <div className="space-y-6">
+          <div className="space-y-6">
               <div className="text-center">
                 <p className="text-gray-700 dark:text-gray-300">
                   {t("Edit purity level from")} <span className="font-bold text-blue-600 dark:text-blue-400">{editPurity}%</span> {t("to")}:
@@ -715,7 +711,8 @@ export default function PurityPage() {
                 min="0"
                 max="100"
                 step="0.1"
-                className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all duration-200 bg-white/50 backdrop-blur-sm placeholder-gray-500 text-gray-900 dark:bg-gray-800/50 dark:border-gray-600 dark:text-gray-100 dark:placeholder-gray-400"
+                disabled={configLoading}
+                className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all duration-200 bg-white/50 backdrop-blur-sm placeholder-gray-500 text-gray-900 dark:bg-gray-800/50 dark:border-gray-600 dark:text-gray-100 dark:placeholder-gray-400 disabled:opacity-60 disabled:cursor-not-allowed"
               />
               
               <div className="flex flex-col sm:flex-row gap-3">
@@ -724,19 +721,32 @@ export default function PurityPage() {
                     setEditPurity(null);
                     setEditValue('');
                   }}
-                  className="flex-1 px-6 py-3 bg-white/80 backdrop-blur-sm border-2 border-gray-300 text-gray-700 hover:bg-gray-50 hover:border-gray-400 font-medium rounded-xl shadow-sm hover:shadow-md transition-all duration-200 dark:bg-gray-700/80 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-600"
+                  disabled={configLoading}
+                  className="flex-1 px-6 py-3 bg-white/80 backdrop-blur-sm border-2 border-gray-300 text-gray-700 hover:bg-gray-50 hover:border-gray-400 font-medium rounded-xl shadow-sm hover:shadow-md transition-all duration-200 dark:bg-gray-700/80 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-600 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   {t("Cancel")}
                 </button>
+                {/* ✅ Update button with spinner */}
                 <button
                   onClick={handleEditPurity}
-                  className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-medium rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105"
+                  disabled={configLoading}
+                  className={`flex-1 px-6 py-3 font-medium rounded-xl shadow-lg transition-all duration-200 transform ${
+                    configLoading
+                      ? 'bg-gray-300 text-gray-500 cursor-not-allowed dark:bg-gray-600 dark:text-gray-400'
+                      : 'bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white hover:shadow-xl hover:scale-105'
+                  }`}
                 >
-                  {t("Update")}
+                  {configLoading ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      {t("Updating...")}
+                    </span>
+                  ) : (
+                    t("Update")
+                  )}
                 </button>
               </div>
             </div>
-          </div>
         </Modal>
   
         {/* Delete Confirmation Modal */}
@@ -744,10 +754,8 @@ export default function PurityPage() {
           isOpen={deleteConfirm !== null}
           onClose={() => setDeleteConfirm(null)}
           title={t("Confirm Delete")}
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50"
         >
-          <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-gray-200/50 p-6 max-w-md w-full dark:bg-gray-800/95 dark:border-gray-700/50">
-            <div className="space-y-6">
+          <div className="space-y-6">
               <div className="text-center">
                 <div className="w-16 h-16 bg-gradient-to-r from-red-500 to-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
                   <Trash2 size={32} className="text-white" />
@@ -765,19 +773,32 @@ export default function PurityPage() {
               <div className="flex flex-col sm:flex-row gap-3">
                 <button
                   onClick={() => setDeleteConfirm(null)}
-                  className="flex-1 px-6 py-3 bg-white/80 backdrop-blur-sm border-2 border-gray-300 text-gray-700 hover:bg-gray-50 hover:border-gray-400 font-medium rounded-xl shadow-sm hover:shadow-md transition-all duration-200 dark:bg-gray-700/80 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-600"
+                  disabled={configLoading}
+                  className="flex-1 px-6 py-3 bg-white/80 backdrop-blur-sm border-2 border-gray-300 text-gray-700 hover:bg-gray-50 hover:border-gray-400 font-medium rounded-xl shadow-sm hover:shadow-md transition-all duration-200 dark:bg-gray-700/80 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-600 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   {t("Cancel")}
                 </button>
+                {/* ✅ Delete button with spinner */}
                 <button
                   onClick={() => handleDeletePurity(deleteConfirm)}
-                  className="flex-1 px-6 py-3 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white font-medium rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105"
+                  disabled={configLoading}
+                  className={`flex-1 px-6 py-3 font-medium rounded-xl shadow-lg transition-all duration-200 transform ${
+                    configLoading
+                      ? 'bg-gray-300 text-gray-500 cursor-not-allowed dark:bg-gray-600 dark:text-gray-400'
+                      : 'bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white hover:shadow-xl hover:scale-105'
+                  }`}
                 >
-                  {t("Delete")}
+                  {configLoading ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      {t("Deleting...")}
+                    </span>
+                  ) : (
+                    t("Delete")
+                  )}
                 </button>
               </div>
             </div>
-          </div>
         </Modal>
       </div>
     </div>
