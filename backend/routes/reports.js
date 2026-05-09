@@ -646,10 +646,21 @@ router.get("/sales", async (req, res) => {
     // Build final response with same structure as before
     const uniqueCustomerCount = new Set(decryptedSales.map(sale => sale.customerMobile).filter(mobile => mobile)).size;
     
+    // For all-time, fetch actual first and last sale dates
+    let actualStartDate = startDate || null;
+    let actualEndDate = endDate || null;
+    if (!startDate && !endDate && decryptedSales.length > 0) {
+      const allDates = decryptedSales.map(s => new Date(s.soldAt)).filter(d => !isNaN(d));
+      if (allDates.length > 0) {
+        actualStartDate = new Date(Math.min(...allDates)).toISOString().split('T')[0];
+        actualEndDate = new Date(Math.max(...allDates)).toISOString().split('T')[0];
+      }
+    }
+
     const salesReport = {
       dateRange: {
-        startDate: startDate || null,
-        endDate: endDate || null
+        startDate: actualStartDate,
+        endDate: actualEndDate
       },
 
       summary: {
@@ -1418,10 +1429,21 @@ const decryptedSales = salesDecryption.successful.map(sale => ({
           const silverSales = salesAggregation.filter(item => item._id.metalType === 'silver');
           
           // Build report data structure
+          // For all-time, compute actual date range from the data
+          let dlActualStart = startDate || null;
+          let dlActualEnd = endDate || null;
+          if (!startDate && !endDate && decryptedSales.length > 0) {
+            const allDates = decryptedSales.map(s => new Date(s.soldAt)).filter(d => !isNaN(d));
+            if (allDates.length > 0) {
+              dlActualStart = new Date(Math.min(...allDates)).toISOString().split('T')[0];
+              dlActualEnd = new Date(Math.max(...allDates)).toISOString().split('T')[0];
+            }
+          }
+
           reportData = {
             dateRange: {
-              startDate: startDate || null,
-              endDate: endDate || null
+              startDate: dlActualStart,
+              endDate: dlActualEnd
             },
             summary: {
               totalRevenue: summary.totalRevenue,
