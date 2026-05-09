@@ -201,6 +201,16 @@ const formatAPIDateForDisplay = (dateString) => {
   if (isNaN(date.getTime())) return '';
   return formatDateObjectForDisplay(date);
 };
+// ── Indian number format (e.g. 10,00,000)
+const formatIndianNumber = (num) => {
+  if (num === null || num === undefined || isNaN(num)) return '0';
+  const n = Math.round(Number(num));
+  const s = n.toString();
+  if (s.length <= 3) return s;
+  const last3 = s.slice(-3);
+  const rest = s.slice(0, -3);
+  return rest.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + ',' + last3;
+};
 
 // ── Platform helpers
 const isCapacitorApp = () =>
@@ -257,13 +267,16 @@ const ReportPage = () => {
   const [customersData, setCustomersData] = useState(null);
   const [loading, setLoading]             = useState({ stock: false, sales: false, customers: false });
   const [customerFields, setCustomerFields] = useState({
-    name: true, address: true, mobile: true,
-    purchaseAmount: true, purchaseItems: false
+    name: true, address: false, mobile: false,
+    purchaseAmount: true, purchaseItems: true
   });
   const [downloadModal, setDownloadModal] = useState({ open: false, type: '', data: null });
   const [categoryData, setCategoryData]   = useState({ gold: [], silver: [] });
   const [includeEntries, setIncludeEntries] = useState(false);
   const [error, setError]                 = useState('');
+  const [pieExpanded, setPieExpanded] = useState({});
+  const [actualDateRange, setActualDateRange] = useState({ startDate: '', endDate: '' });
+
 
   const COLORS = [
     '#8884d8','#82ca9d','#ffc658','#ff7300','#00ff00',
@@ -732,7 +745,17 @@ const generateSilverSheetData = (data, silverCategories, formatDate, fmtPurity) 
       const response = await api.get(`/api/reports/sales?${params}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      setSalesData(response.data.salesReport);
+      const report = response.data.salesReport;
+      setSalesData(report);
+      console.log('dateRange from backend:', report?.dateRange);
+console.log('dailyRevenue length:', report?.dailyRevenue?.length);
+      // Capture actual date range returned by backend (important for all-time)
+      if (report?.dateRange) {
+        setActualDateRange({
+          startDate: report.dateRange.startDate || '',
+          endDate:   report.dateRange.endDate   || ''
+        });
+      }
     } catch (error) {
       setError('Failed to load sales data');
       console.error('Sales data error:', error);
@@ -772,12 +795,13 @@ const generateSalesPDFReport = async (data, filename) => {
     const doc = await createJsPDF();
     const content = [];
     content.push({ text: 'SALES REPORT', style: 'header', alignment: 'center' });
-    if (data.dateRange) {
-      content.push({
-        text: `Period: ${data.dateRange.startDate ? formatAPIDateForDisplay(data.dateRange.startDate) : 'Start'} to ${data.dateRange.endDate ? formatAPIDateForDisplay(data.dateRange.endDate) : 'End'}`,
-        style: 'normal', alignment: 'center'
-      });
-    }
+    // Resolve display dates — prefer data.dateRange (from backend), fallback to actualDateRange
+    const pdfStart = data.dateRange?.startDate || actualDateRange.startDate;
+    const pdfEnd   = data.dateRange?.endDate   || actualDateRange.endDate;
+    content.push({
+      text: `Period: ${pdfStart ? formatAPIDateForDisplay(pdfStart) : 'All Time (Start)'} to ${pdfEnd ? formatAPIDateForDisplay(pdfEnd) : 'All Time (End)'}`,
+      style: 'normal', alignment: 'center'
+    });
     content.push({ text: `Generated: ${formatDateObjectForDisplay(new Date())}`, style: 'normal', alignment: 'center' });
     content.push({ text: ' ', margin: [0, 0, 0, 6] });
     if (data.summary) {
@@ -785,6 +809,19 @@ const generateSalesPDFReport = async (data, filename) => {
       content.push({ text: `Total Revenue: Rs. ${(data.summary.totalRevenue || 0).toLocaleString()}`, style: 'normal' });
       content.push({ text: `Total Items Sold: ${data.summary.totalItems || 0}`, style: 'normal' });
       content.push({ text: `Average Sale Value: Rs. ${data.summary.totalItems ? Math.round(data.summary.totalRevenue / data.summary.totalItems).toLocaleString() : 0}`, style: 'normal' });
+      // Avg sales per day stats
+      const pdfActiveDays = data.dailyRevenue?.length > 0 ? data.dailyRevenue.length : 1;
+      const pdfAvgActive  = Math.round(data.summary.totalRevenue / pdfActiveDays);
+      let pdfAllDaysCount = pdfActiveDays;
+      if (pdfStart && pdfEnd) {
+        const diff = Math.round((new Date(pdfEnd) - new Date(pdfStart)) / (1000 * 60 * 60 * 24)) + 1;
+        if (diff > 0) pdfAllDaysCount = diff;
+      }
+      const pdfAvgAll = pdfAllDaysCount > 0 ? Math.round(data.summary.totalRevenue / pdfAllDaysCount) : 0;
+      content.push({ text: `Avg Sales/Day (Active ${pdfActiveDays} days): Rs. ${pdfAvgActive.toLocaleString()}`, style: 'normal' });
+      if (pdfAllDaysCount !== pdfActiveDays) {
+        content.push({ text: `Avg Sales/Day (All ${pdfAllDaysCount} days incl. inactive): Rs. ${pdfAvgAll.toLocaleString()}`, style: 'normal' });
+      }
       content.push({ text: ' ', margin: [0, 0, 0, 4] });
     }
     if (data.byMetal) {
@@ -837,13 +874,34 @@ const generateSalesPDFReport = async (data, filename) => {
   // ── Sales Excel
   const generateSalesExcel = (data) => {
     const wb = XLSX.utils.book_new();
+
+    // Pre-calculate avg/day values
+    const xlsxActiveDays = data.dailyRevenue?.length > 0 ? data.dailyRevenue.length : 1;
+    const xlsxStart = data.dateRange?.startDate || actualDateRange.startDate;
+    const xlsxEnd   = data.dateRange?.endDate   || actualDateRange.endDate;
+    let xlsxAllDays = xlsxActiveDays;
+    if (xlsxStart && xlsxEnd) {
+      const diff = Math.round((new Date(xlsxEnd) - new Date(xlsxStart)) / (1000 * 60 * 60 * 24)) + 1;
+      if (diff > 0) xlsxAllDays = diff;
+    }
+    const xlsxAvgActive = Math.round((data.summary?.totalRevenue || 0) / xlsxActiveDays);
+    const xlsxAvgAll    = Math.round((data.summary?.totalRevenue || 0) / xlsxAllDays);
+
+    const reportStart = xlsxStart ? formatAPIDateForDisplay(xlsxStart) : 'All Time (Start)';
+    const reportEnd   = xlsxEnd   ? formatAPIDateForDisplay(xlsxEnd)   : 'All Time (End)';
+
     const summaryData = [
       ['SALES REPORT'], [''], ['EXECUTIVE SUMMARY'],
-      ['Report Period', `${data.dateRange?.startDate ? formatAPIDateForDisplay(data.dateRange.startDate) : 'Start'} to ${data.dateRange?.endDate ? formatAPIDateForDisplay(data.dateRange.endDate) : 'End'}`],
+      ['Report Period', `${reportStart} to ${reportEnd}`],
       ['Generated on', formatDateObjectForDisplay(new Date())], [''],
       ['Total Revenue',      `Rs. ${(data.summary?.totalRevenue || 0).toLocaleString()}`],
       ['Total Items Sold',   `${data.summary?.totalItems || 0} items`],
       ['Average Sale Value', `Rs. ${data.summary?.totalItems ? Math.round(data.summary.totalRevenue / data.summary.totalItems).toLocaleString() : 0}`],
+      ['Avg Sales/Day (Active Days)', `Rs. ${xlsxAvgActive.toLocaleString()} (over ${xlsxActiveDays} active days)`],
+      ...(xlsxAllDays !== xlsxActiveDays
+        ? [['Avg Sales/Day (All Days)', `Rs. ${xlsxAvgAll.toLocaleString()} (over ${xlsxAllDays} total days)`]]
+        : []
+      ),
       [''], ['METAL-WISE PERFORMANCE'], ['']
     ];
     if (data.byMetal?.gold?.totalRevenue > 0) {
@@ -1035,73 +1093,86 @@ const generateCustomerPDFReport = async (reportData, filename, selectedFields) =
     </div>
   );
 
+// ── Avg sales per day helper (place this just before your return statement)
+  const avgSalesPerDay = salesData
+    ? salesData.dailyRevenue?.length > 0
+      ? Math.round(salesData.summary.totalRevenue / salesData.dailyRevenue.length)
+      : salesData.summary.totalRevenue > 0 ? salesData.summary.totalRevenue : 0
+    : 0;
+
   return (
-  <div className="w-full min-h-screen bg-gray-50 dark:bg-gray-900">
-    <div className="w-full max-w-7xl mx-auto px-2 sm:px-4 md:px-6 lg:px-8 py-3 sm:py-4 md:py-6 lg:py-8 space-y-3 sm:space-y-4 md:space-y-6 lg:space-y-8">
-      
-      {/* Header Section */}
-      <div className="w-full bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-xl md:rounded-2xl shadow-xl border border-gray-200/50 dark:border-gray-700/50 p-4 sm:p-6 md:p-8 transition-all duration-300 hover:shadow-2xl">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 md:gap-4">
-          <div className="flex items-center gap-2 md:gap-4">
-            <h1 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold bg-gradient-to-r from-blue-600 to-blue-700 bg-clip-text text-transparent">
-              Reports Dashboard
-            </h1>
+    <div className="w-full min-h-screen bg-gray-50 dark:bg-gray-900">
+      <div className="w-full max-w-7xl mx-auto px-2 sm:px-4 md:px-6 lg:px-8 py-3 sm:py-4 md:py-6 lg:py-8 space-y-3 sm:space-y-4 md:space-y-6 lg:space-y-8">
+  
+        {/* Header Section */}
+        <div className="w-full bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-xl md:rounded-2xl shadow-xl border border-gray-200/50 dark:border-gray-700/50 p-4 sm:p-6 md:p-8 transition-all duration-300 hover:shadow-2xl">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 md:gap-4">
+            <div className="flex items-center gap-2 md:gap-4">
+              <h1 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold bg-gradient-to-r from-blue-600 to-blue-700 bg-clip-text text-transparent">
+                Reports Dashboard
+              </h1>
+            </div>
           </div>
         </div>
-      </div>
-      {/* Error Message */}
-      {error && (
-        <div className="bg-red-50/80 dark:bg-red-900/20 backdrop-blur-sm border-2 border-red-200 dark:border-red-700/50 rounded-xl md:rounded-2xl p-4 sm:p-6 shadow-lg">
-          <ErrorMessage message={error} />
-        </div>
-      )}
-      {/* Stock Report Section */}
-      <div className="w-full bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-xl md:rounded-2xl shadow-xl border border-gray-200/50 dark:border-gray-700/50 p-4 sm:p-6 md:p-8 hover:shadow-2xl transition-all duration-300">
-        <div className="flex items-center gap-3 mb-6 md:mb-8">
-          <div className="p-2.5 sm:p-3 bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl shadow-lg">
-            <Package className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
+  
+        {/* Error Message */}
+        {error && (
+          <div className="bg-red-50/80 dark:bg-red-900/20 backdrop-blur-sm border-2 border-red-200 dark:border-red-700/50 rounded-xl md:rounded-2xl p-4 sm:p-6 shadow-lg">
+            <ErrorMessage message={error} />
           </div>
-          <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 dark:text-gray-100">Stock Report</h2>
-        </div>
-        {loading.stock ? (
-          <div className="flex items-center justify-center py-12">
-            <LoadingSpinner />
+        )}
+  
+        {/* ── STOCK REPORT SECTION ── */}
+        <div className="w-full bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-xl md:rounded-2xl shadow-xl border border-gray-200/50 dark:border-gray-700/50 p-4 sm:p-6 md:p-8 hover:shadow-2xl transition-all duration-300">
+          <div className="flex items-center gap-3 mb-6 md:mb-8">
+            <div className="p-2.5 sm:p-3 bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl shadow-lg">
+              <Package className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
+            </div>
+            <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 dark:text-gray-100">Stock Report</h2>
           </div>
-        ) : stockData ? (
-          <div className="space-y-6 md:space-y-8">
-            
-            {/* Gold Stock Section */}
-            <div className="bg-gradient-to-br from-yellow-50 to-amber-50 dark:from-yellow-900/20 dark:to-amber-900/20 p-4 sm:p-6 md:p-8 rounded-xl md:rounded-2xl border border-yellow-200/50 dark:border-yellow-700/50 shadow-lg hover:shadow-xl transition-all duration-300">
-              <h3 className="text-lg sm:text-xl md:text-2xl font-bold text-yellow-800 dark:text-yellow-200 mb-6 flex items-center gap-2">
-                <div className="w-3 h-3 bg-gradient-to-r from-yellow-400 to-amber-500 rounded-full"></div>
-                Gold Inventory
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 mb-6">
-                <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm p-4 sm:p-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 border border-gray-200/50 dark:border-gray-700/50">
-                  <p className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium mb-2">Total Gross Weight</p>
-                  <p className="text-xl sm:text-2xl md:text-3xl font-bold bg-gradient-to-r from-yellow-600 to-amber-600 bg-clip-text text-transparent">
-                    {stockData.gold.totalGross} g
-                  </p>
+  
+          {loading.stock ? (
+            <div className="flex items-center justify-center py-12">
+              <LoadingSpinner />
+            </div>
+          ) : stockData ? (
+            <div className="space-y-6 md:space-y-8">
+  
+              {/* ── GOLD INVENTORY ── */}
+              <div className="bg-gradient-to-br from-yellow-50 to-amber-50 dark:from-yellow-900/20 dark:to-amber-900/20 p-3 sm:p-6 md:p-8 rounded-xl md:rounded-2xl border border-yellow-200/50 dark:border-yellow-700/50 shadow-lg hover:shadow-xl transition-all duration-300">
+                <h3 className="text-lg sm:text-xl md:text-2xl font-bold text-yellow-800 dark:text-yellow-200 mb-4 sm:mb-6 flex items-center gap-2">
+                  <div className="w-3 h-3 bg-gradient-to-r from-yellow-400 to-amber-500 rounded-full"></div>
+                  Gold Inventory
+                </h3>
+  
+                {/* Metric cards — 3 columns always on mobile, compact padding */}
+                <div className="grid grid-cols-3 gap-2 md:gap-6 mb-4 md:mb-6">
+                  <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm p-2 sm:p-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 border border-gray-200/50 dark:border-gray-700/50">
+                    <p className="text-xs sm:text-base text-gray-600 dark:text-gray-400 font-medium mb-1 sm:mb-2 leading-tight">Total Gross Weight</p>
+                    <p className="text-sm sm:text-2xl md:text-3xl font-bold bg-gradient-to-r from-yellow-600 to-amber-600 bg-clip-text text-transparent">
+                      {stockData.gold.totalGross} g
+                    </p>
+                  </div>
+                  <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm p-2 sm:p-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 border border-gray-200/50 dark:border-gray-700/50">
+                    <p className="text-xs sm:text-base text-gray-600 dark:text-gray-400 font-medium mb-1 sm:mb-2 leading-tight">Total Pure Weight</p>
+                    <p className="text-sm sm:text-2xl md:text-3xl font-bold bg-gradient-to-r from-yellow-600 to-amber-600 bg-clip-text text-transparent">
+                      {stockData.gold.totalPure} g
+                    </p>
+                  </div>
+                  <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm p-2 sm:p-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 border border-gray-200/50 dark:border-gray-700/50">
+                    <p className="text-xs sm:text-base text-gray-600 dark:text-gray-400 font-medium mb-1 sm:mb-2 leading-tight">Avg Purity</p>
+                    <p className="text-sm sm:text-2xl md:text-3xl font-bold bg-gradient-to-r from-yellow-600 to-amber-600 bg-clip-text text-transparent">
+                      {stockData.gold.averagePurity}%
+                    </p>
+                  </div>
                 </div>
-                <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm p-4 sm:p-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 border border-gray-200/50 dark:border-gray-700/50">
-                  <p className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium mb-2">Total Pure Weight</p>
-                  <p className="text-xl sm:text-2xl md:text-3xl font-bold bg-gradient-to-r from-yellow-600 to-amber-600 bg-clip-text text-transparent">
-                    {stockData.gold.totalPure} g
-                  </p>
-                </div>
-                <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm p-4 sm:p-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 border border-gray-200/50 dark:border-gray-700/50 sm:col-span-2 lg:col-span-1">
-                  <p className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium mb-2">Average Purity</p>
-                  <p className="text-xl sm:text-2xl md:text-3xl font-bold bg-gradient-to-r from-yellow-600 to-amber-600 bg-clip-text text-transparent">
-                    {stockData.gold.averagePurity}%
-                  </p>
-                </div>
-              </div>
-              {Object.keys(stockData.gold.categories).length > 0 && (
-                <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm rounded-xl overflow-hidden shadow-lg border border-gray-200/50 dark:border-gray-700/50">
-                  <h4 className="text-base sm:text-lg md:text-xl font-bold p-4 sm:p-6 bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-700 text-gray-900 dark:text-gray-100 border-b border-gray-200 dark:border-gray-600">
-                    Category Breakdown
-                  </h4>
-                  <div className="hidden md:block">
+  
+                {/* Category Breakdown — HIDDEN on mobile, visible md+ */}
+                {Object.keys(stockData.gold.categories).length > 0 && (
+                  <div className="hidden md:block bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm rounded-xl overflow-hidden shadow-lg border border-gray-200/50 dark:border-gray-700/50">
+                    <h4 className="text-base sm:text-lg md:text-xl font-bold p-4 sm:p-6 bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-700 text-gray-900 dark:text-gray-100 border-b border-gray-200 dark:border-gray-600">
+                      Category Breakdown
+                    </h4>
                     <table className="w-full text-sm md:text-base">
                       <thead className="bg-gradient-to-r from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-600">
                         <tr>
@@ -1125,47 +1196,36 @@ const generateCustomerPDFReport = async (reportData, filename, selectedFields) =
                       </tbody>
                     </table>
                   </div>
-                  <div className="block md:hidden space-y-3 p-4">
-                    {Object.entries(stockData.gold.categories).map(([category, data]) => (
-                      <div key={category} className="bg-white/60 dark:bg-gray-700/60 backdrop-blur-sm rounded-lg p-4 border border-gray-200/50 dark:border-gray-600/50">
-                        <h5 className="font-bold text-gray-900 dark:text-gray-100 mb-3">{category}</h5>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div><p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Quantity</p><p className="text-sm font-bold text-blue-600 dark:text-blue-400">{data.totalItems}</p></div>
-                          <div><p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Purity</p><p className="text-sm font-semibold text-gray-700 dark:text-gray-300">{data.averagePurity}%</p></div>
-                          <div><p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Gross Weight</p><p className="text-sm font-semibold text-gray-700 dark:text-gray-300">{data.grossWeight}g</p></div>
-                          <div><p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Pure Weight</p><p className="text-sm font-semibold text-gray-700 dark:text-gray-300">{data.pureWeight}g</p></div>
-                        </div>
-                      </div>
-                    ))}
+                )}
+              </div>
+  
+              {/* ── SILVER INVENTORY ── */}
+              <div className="bg-gradient-to-br from-gray-50 to-slate-50 dark:from-gray-900/20 dark:to-slate-900/20 p-3 sm:p-6 md:p-8 rounded-xl md:rounded-2xl border border-gray-200/50 dark:border-gray-700/50 shadow-lg hover:shadow-xl transition-all duration-300">
+                <h3 className="text-lg sm:text-xl md:text-2xl font-bold text-gray-800 dark:text-gray-200 mb-4 sm:mb-6 flex items-center gap-2">
+                  <div className="w-3 h-3 bg-gradient-to-r from-gray-400 to-slate-500 rounded-full"></div>
+                  Silver Inventory
+                </h3>
+  
+                {/* Metric cards — 3 columns always on mobile */}
+                <div className="grid grid-cols-3 gap-2 md:gap-6 mb-4 md:mb-6">
+                  <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm p-2 sm:p-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 border border-gray-200/50 dark:border-gray-700/50">
+                    <p className="text-xs sm:text-base text-gray-600 dark:text-gray-400 font-medium mb-1 sm:mb-2 leading-tight">Total Gross Weight</p>
+                    <p className="text-sm sm:text-2xl md:text-3xl font-bold bg-gradient-to-r from-gray-600 to-slate-600 bg-clip-text text-transparent">{stockData.silver.totalGross} g</p>
+                  </div>
+                  <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm p-2 sm:p-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 border border-gray-200/50 dark:border-gray-700/50">
+                    <p className="text-xs sm:text-base text-gray-600 dark:text-gray-400 font-medium mb-1 sm:mb-2 leading-tight">Total Pure Weight</p>
+                    <p className="text-sm sm:text-2xl md:text-3xl font-bold bg-gradient-to-r from-gray-600 to-slate-600 bg-clip-text text-transparent">{stockData.silver.totalPure} g</p>
+                  </div>
+                  <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm p-2 sm:p-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 border border-gray-200/50 dark:border-gray-700/50">
+                    <p className="text-xs sm:text-base text-gray-600 dark:text-gray-400 font-medium mb-1 sm:mb-2 leading-tight">Avg Purity</p>
+                    <p className="text-sm sm:text-2xl md:text-3xl font-bold bg-gradient-to-r from-gray-600 to-slate-600 bg-clip-text text-transparent">{stockData.silver.averagePurity}%</p>
                   </div>
                 </div>
-              )}
-            </div>
-
-            {/* Silver Stock Section */}
-            <div className="bg-gradient-to-br from-gray-50 to-slate-50 dark:from-gray-900/20 dark:to-slate-900/20 p-4 sm:p-6 md:p-8 rounded-xl md:rounded-2xl border border-gray-200/50 dark:border-gray-700/50 shadow-lg hover:shadow-xl transition-all duration-300">
-              <h3 className="text-lg sm:text-xl md:text-2xl font-bold text-gray-800 dark:text-gray-200 mb-6 flex items-center gap-2">
-                <div className="w-3 h-3 bg-gradient-to-r from-gray-400 to-slate-500 rounded-full"></div>
-                Silver Inventory
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 mb-6">
-                <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm p-4 sm:p-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 border border-gray-200/50 dark:border-gray-700/50">
-                  <p className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium mb-2">Total Gross Weight</p>
-                  <p className="text-xl sm:text-2xl md:text-3xl font-bold bg-gradient-to-r from-gray-600 to-slate-600 bg-clip-text text-transparent">{stockData.silver.totalGross} g</p>
-                </div>
-                <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm p-4 sm:p-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 border border-gray-200/50 dark:border-gray-700/50">
-                  <p className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium mb-2">Total Pure Weight</p>
-                  <p className="text-xl sm:text-2xl md:text-3xl font-bold bg-gradient-to-r from-gray-600 to-slate-600 bg-clip-text text-transparent">{stockData.silver.totalPure} g</p>
-                </div>
-                <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm p-4 sm:p-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 border border-gray-200/50 dark:border-gray-700/50 sm:col-span-2 lg:col-span-1">
-                  <p className="text-sm md:text-base text-gray-600 dark:text-gray-400 font-medium mb-2">Average Purity</p>
-                  <p className="text-xl sm:text-2xl md:text-3xl font-bold bg-gradient-to-r from-gray-600 to-slate-600 bg-clip-text text-transparent">{stockData.silver.averagePurity}%</p>
-                </div>
-              </div>
-              {Object.keys(stockData.silver.categories).length > 0 && (
-                <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm rounded-xl overflow-hidden shadow-lg border border-gray-200/50 dark:border-gray-700/50">
-                  <h4 className="text-base sm:text-lg md:text-xl font-bold p-4 sm:p-6 bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-700 text-gray-900 dark:text-gray-100 border-b border-gray-200 dark:border-gray-600">Category Breakdown</h4>
-                  <div className="hidden md:block">
+  
+                {/* Category Breakdown — HIDDEN on mobile, visible md+ */}
+                {Object.keys(stockData.silver.categories).length > 0 && (
+                  <div className="hidden md:block bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm rounded-xl overflow-hidden shadow-lg border border-gray-200/50 dark:border-gray-700/50">
+                    <h4 className="text-base sm:text-lg md:text-xl font-bold p-4 sm:p-6 bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-700 text-gray-900 dark:text-gray-100 border-b border-gray-200 dark:border-gray-600">Category Breakdown</h4>
                     <table className="w-full text-sm md:text-base">
                       <thead className="bg-gradient-to-r from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-600">
                         <tr>
@@ -1189,237 +1249,239 @@ const generateCustomerPDFReport = async (reportData, filename, selectedFields) =
                       </tbody>
                     </table>
                   </div>
-                  <div className="block md:hidden space-y-3 p-4">
-                    {Object.entries(stockData.silver.categories).map(([category, data]) => (
-                      <div key={category} className="bg-white/60 dark:bg-gray-700/60 backdrop-blur-sm rounded-lg p-4 border border-gray-200/50 dark:border-gray-600/50">
-                        <h5 className="font-bold text-gray-900 dark:text-gray-100 mb-3">{category}</h5>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div><p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Quantity</p><p className="text-sm font-bold text-blue-600 dark:text-blue-400">{data.totalItems}</p></div>
-                          <div><p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Purity</p><p className="text-sm font-semibold text-gray-700 dark:text-gray-300">{data.averagePurity}%</p></div>
-                          <div><p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Gross Weight</p><p className="text-sm font-semibold text-gray-700 dark:text-gray-300">{data.grossWeight}g</p></div>
-                          <div><p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Pure Weight</p><p className="text-sm font-semibold text-gray-700 dark:text-gray-300">{data.pureWeight}g</p></div>
+                )}
+              </div>
+  
+              {/* ── PIE CHARTS ── */}
+              <div className="hidden md:grid grid-cols-1 xl:grid-cols-2 gap-6 md:gap-8">                {[
+                  { title: "Gold Category Distribution (Pure Weight)", data: categoryData.gold, color: "yellow" },
+                  { title: "Silver Category Distribution (Pure Weight)", data: categoryData.silver, color: "gray" }
+                ].map(({ title, data, color }, i) => (
+                  <div key={i} className={`bg-gradient-to-br ${color === 'yellow' ? 'from-yellow-50 to-amber-50 dark:from-yellow-900/20 dark:to-amber-900/20' : 'from-gray-50 to-slate-50 dark:from-gray-900/20 dark:to-slate-900/20'} backdrop-blur-sm rounded-xl md:rounded-2xl p-4 sm:p-6 md:p-8 border ${color === 'yellow' ? 'border-yellow-200/50 dark:border-yellow-700/50' : 'border-gray-200/50 dark:border-gray-700/50'} shadow-lg hover:shadow-xl transition-all duration-300`}>
+                    <h4 className={`text-base sm:text-lg md:text-xl font-bold ${color === 'yellow' ? 'text-yellow-800 dark:text-yellow-200' : 'text-gray-800 dark:text-gray-200'} mb-6 flex items-center gap-2`}>
+                      <div className={`w-3 h-3 bg-gradient-to-r ${color === 'yellow' ? 'from-yellow-400 to-amber-500' : 'from-gray-400 to-slate-500'} rounded-full`}></div>
+                      {title}
+                    </h4>
+                    {data && data.length > 0 ? (
+                      <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-xl p-4 sm:p-6 shadow-lg border border-gray-200/50 dark:border-gray-700/50 overflow-hidden">
+                        <div className="h-[300px] sm:h-[350px]">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                              <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius="70%" label={renderLabel} labelLine={true}>
+                                {data.map((_, index) => (<Cell key={index} fill={COLORS[index % COLORS.length]} />))}
+                              </Pie>
+                              <Tooltip formatter={(value) => [`${value.toFixed(2)}g`, 'Pure Weight']} />
+                            </PieChart>
+                          </ResponsiveContainer>
                         </div>
+                        <div className="mt-4">
+  <button
+    onClick={() => {
+      const key = `pieExpanded_${i}`;
+      setPieExpanded(prev => ({ ...prev, [key]: !prev[key] }));
+    }}
+    className="w-full flex items-center justify-between px-4 py-2.5 bg-white/70 dark:bg-gray-700/70 backdrop-blur-sm rounded-xl border border-gray-200/50 dark:border-gray-600/50 hover:bg-white/90 dark:hover:bg-gray-700/90 transition-all duration-200 text-sm font-semibold text-gray-700 dark:text-gray-300"
+  >
+    <span>Category Breakdown</span>
+    <span className="text-xs">{pieExpanded[`pieExpanded_${i}`] ? '▲ Hide' : '▼ Show'}</span>
+  </button>
+  {pieExpanded[`pieExpanded_${i}`] && (
+    <div className="mt-2 grid grid-cols-1 gap-2">
+      {data.map((item, index) => (
+        <div key={index} className="flex items-center gap-3 bg-white/60 dark:bg-gray-700/60 backdrop-blur-sm px-3 py-2 rounded-lg border border-gray-200/50 dark:border-gray-600/50">
+          <div className="w-4 h-4 rounded-full shadow-sm flex-shrink-0" style={{ backgroundColor: COLORS[index % COLORS.length] }}></div>
+          <span className="text-sm font-medium text-gray-700 dark:text-gray-300 flex-1">{item.name}</span>
+          <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">{item.value.toFixed(2)}g</span>
+        </div>
+      ))}
+    </div>
+  )}
+</div>
                       </div>
-                    ))}
+                    ) : (
+                      <div className="flex items-center justify-center h-[300px] bg-white/60 dark:bg-gray-800/60 backdrop-blur-sm rounded-xl border border-gray-200/50 dark:border-gray-700/50">
+                        <p className="text-sm text-gray-500 dark:text-gray-400 text-center px-4">No category data available for {color === 'yellow' ? 'gold' : 'silver'}</p>
+                      </div>
+                    )}
                   </div>
-                </div>
-              )}
+                ))}
+              </div>
+  
+              {/* ── STOCK DOWNLOAD BUTTONS ── */}
+              <div className="flex flex-col gap-3 pt-6 border-t border-gray-200/50 dark:border-gray-700/50">
+                <button onClick={() => setDownloadModal({ open: true, type: 'stock-gold', data: stockData.gold })} className="w-full bg-gradient-to-r from-yellow-500 to-amber-600 hover:from-yellow-600 hover:to-amber-700 text-white font-semibold px-6 py-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 flex items-center justify-center gap-2 min-h-[48px]">
+                  <Download className="h-5 w-5" /><span>Download Gold Report</span>
+                </button>
+                <button onClick={() => setDownloadModal({ open: true, type: 'stock-silver', data: stockData.silver })} className="w-full bg-gradient-to-r from-gray-500 to-slate-600 hover:from-gray-600 hover:to-slate-700 text-white font-semibold px-6 py-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 flex items-center justify-center gap-2 min-h-[48px]">
+                  <Download className="h-5 w-5" /><span>Download Silver Report</span>
+                </button>
+                <button onClick={() => setDownloadModal({ open: true, type: 'stock-full', data: stockData })} className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-semibold px-6 py-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 flex items-center justify-center gap-2 min-h-[48px]">
+                  <Download className="h-5 w-5" /><span>Download Full Inventory</span>
+                </button>
+              </div>
             </div>
-
-            {/* Category Pie Charts */}
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 md:gap-8">
-              {[
-                { title: "Gold Category Distribution (Pure Weight)", data: categoryData.gold, color: "yellow" }, 
-                { title: "Silver Category Distribution (Pure Weight)", data: categoryData.silver, color: "gray" }
-              ].map(({ title, data, color }, i) => (
-                <div key={i} className={`bg-gradient-to-br ${color === 'yellow' ? 'from-yellow-50 to-amber-50 dark:from-yellow-900/20 dark:to-amber-900/20' : 'from-gray-50 to-slate-50 dark:from-gray-900/20 dark:to-slate-900/20'} backdrop-blur-sm rounded-xl md:rounded-2xl p-4 sm:p-6 md:p-8 border ${color === 'yellow' ? 'border-yellow-200/50 dark:border-yellow-700/50' : 'border-gray-200/50 dark:border-gray-700/50'} shadow-lg hover:shadow-xl transition-all duration-300`}>
-                  <h4 className={`text-base sm:text-lg md:text-xl font-bold ${color === 'yellow' ? 'text-yellow-800 dark:text-yellow-200' : 'text-gray-800 dark:text-gray-200'} mb-6 flex items-center gap-2`}>
-                    <div className={`w-3 h-3 bg-gradient-to-r ${color === 'yellow' ? 'from-yellow-400 to-amber-500' : 'from-gray-400 to-slate-500'} rounded-full`}></div>
-                    {title}
-                  </h4>
-                  {data && data.length > 0 ? (
-                    <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-xl p-4 sm:p-6 shadow-lg border border-gray-200/50 dark:border-gray-700/50 overflow-hidden">
-                      <div className="h-[300px] sm:h-[350px]">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <PieChart>
-                            <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius="70%" label={renderLabel} labelLine={true}>
-                              {data.map((_, index) => (<Cell key={index} fill={COLORS[index % COLORS.length]} />))}
-                            </Pie>
-                            <Tooltip formatter={(value) => [`${value.toFixed(2)}g`, 'Pure Weight']} />
-                          </PieChart>
-                        </ResponsiveContainer>
-                      </div>
-                      <div className="mt-4 grid grid-cols-1 gap-2">
-                        {data.map((item, index) => (
-                          <div key={index} className="flex items-center gap-3 bg-white/60 dark:bg-gray-700/60 backdrop-blur-sm px-3 py-2 rounded-lg border border-gray-200/50 dark:border-gray-600/50">
-                            <div className="w-4 h-4 rounded-full shadow-sm flex-shrink-0" style={{ backgroundColor: COLORS[index % COLORS.length] }}></div>
-                            <span className="text-sm font-medium text-gray-700 dark:text-gray-300 flex-1">{item.name}</span>
-                            <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">{item.value.toFixed(2)}g</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex items-center justify-center h-[300px] bg-white/60 dark:bg-gray-800/60 backdrop-blur-sm rounded-xl border border-gray-200/50 dark:border-gray-700/50">
-                      <p className="text-sm text-gray-500 dark:text-gray-400 text-center px-4">No category data available for {color === 'yellow' ? 'gold' : 'silver'}</p>
-                    </div>
-                  )}
-                </div>
+          ) : (
+            <div className="flex items-center justify-center py-12 bg-white/60 dark:bg-gray-800/60 backdrop-blur-sm rounded-xl border border-gray-200/50 dark:border-gray-700/50">
+              <p className="text-gray-500 dark:text-gray-400 text-lg text-center px-4">No stock data available</p>
+            </div>
+          )}
+        </div>
+  
+        {/* ── SALES REPORT SECTION ── */}
+        <div className="w-full max-w-7xl mx-auto bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-xl md:rounded-2xl shadow-xl border border-gray-200/50 dark:border-gray-700/50 p-2 sm:p-4 md:p-6 lg:p-8 hover:shadow-2xl transition-all duration-300">
+          <div className="flex items-center gap-2 sm:gap-3 mb-6 md:mb-8">
+            <div className="p-2 sm:p-2.5 md:p-3 bg-gradient-to-r from-green-600 to-emerald-700 rounded-xl shadow-lg">
+              <TrendingUp className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
+            </div>
+            <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 dark:text-gray-100">Sales Report</h2>
+          </div>
+  
+          {/* Date Range Selection */}
+          <div className="bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-700 p-3 sm:p-4 md:p-6 rounded-xl md:rounded-2xl mb-6 md:mb-8 border border-gray-200/50 dark:border-gray-600/50 shadow-lg hover:shadow-xl transition-all duration-300">
+            <h3 className="text-base sm:text-lg md:text-xl font-bold text-gray-900 dark:text-gray-100 mb-4 md:mb-6 flex items-center gap-2">
+              <div className="w-3 h-3 bg-gradient-to-r from-blue-400 to-blue-500 rounded-full"></div>
+              Date Range Selection
+            </h3>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3 mb-4 md:mb-6">
+              {['today','week','month','6months','year','alltime'].map((period, i) => (
+                <button key={period} className="bg-white/80 dark:bg-gray-700/80 backdrop-blur-sm border-2 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 hover:border-blue-400 dark:hover:border-blue-500 font-medium px-2 sm:px-3 md:px-4 py-2 sm:py-2.5 rounded-xl shadow-sm hover:shadow-md transition-all duration-200 text-xs sm:text-sm min-h-[44px] flex items-center justify-center" onClick={() => handleQuickDateSelect(period)}>
+                  {['Today','Last Week','Last Month','Last 6 Months','Last Year','All Time'][i]}
+                </button>
               ))}
             </div>
-
-            {/* Download Options */}
-            <div className="flex flex-col gap-3 pt-6 border-t border-gray-200/50 dark:border-gray-700/50">
-              <button onClick={() => setDownloadModal({ open: true, type: 'stock-gold', data: stockData.gold })} className="w-full bg-gradient-to-r from-yellow-500 to-amber-600 hover:from-yellow-600 hover:to-amber-700 text-white font-semibold px-6 py-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 flex items-center justify-center gap-2 min-h-[48px]">
-                <Download className="h-5 w-5" /><span>Download Gold Report</span>
-              </button>
-              <button onClick={() => setDownloadModal({ open: true, type: 'stock-silver', data: stockData.silver })} className="w-full bg-gradient-to-r from-gray-500 to-slate-600 hover:from-gray-600 hover:to-slate-700 text-white font-semibold px-6 py-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 flex items-center justify-center gap-2 min-h-[48px]">
-                <Download className="h-5 w-5" /><span>Download Silver Report</span>
-              </button>
-              <button onClick={() => setDownloadModal({ open: true, type: 'stock-full', data: stockData })} className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-semibold px-6 py-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 flex items-center justify-center gap-2 min-h-[48px]">
-                <Download className="h-5 w-5" /><span>Download Full Inventory</span>
-              </button>
-            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+  <div>
+    <label className="block text-sm font-semibold mb-2 text-gray-700 dark:text-gray-300">Start Date</label>
+    <input
+      type="date"
+      value={dateRange.startDate || actualDateRange.startDate}
+      onChange={(e) => handleDateRangeChange('startDate', e.target.value)}
+      className="w-full px-3 sm:px-4 py-2.5 sm:py-3 border-2 border-gray-200 dark:border-gray-600 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all duration-200 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm text-gray-900 dark:text-gray-100 text-sm sm:text-base min-h-[44px]"
+    />
+  </div>
+  <div>
+    <label className="block text-sm font-semibold mb-2 text-gray-700 dark:text-gray-300">End Date</label>
+    <input
+      type="date"
+      value={dateRange.endDate || actualDateRange.endDate}
+      onChange={(e) => handleDateRangeChange('endDate', e.target.value)}
+      className="w-full px-3 sm:px-4 py-2.5 sm:py-3 border-2 border-gray-200 dark:border-gray-600 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all duration-200 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm text-gray-900 dark:text-gray-100 text-sm sm:text-base min-h-[44px]"
+    />
+  </div>
+</div>
           </div>
-        ) : (
-          <div className="flex items-center justify-center py-12 bg-white/60 dark:bg-gray-800/60 backdrop-blur-sm rounded-xl border border-gray-200/50 dark:border-gray-700/50">
-            <p className="text-gray-500 dark:text-gray-400 text-lg text-center px-4">No stock data available</p>
-          </div>
-        )}
+  
+          {loading.sales ? (
+            <div className="flex items-center justify-center py-12"><LoadingSpinner /></div>
+          ) : salesData ? (
+            <div className="space-y-6 md:space-y-8">
+  
+              {/* ── SALES SUMMARY CARDS — now 4 cards in 2×2 on mobile, 4-col on lg ── */}
+              {(() => {
+  const activeDays = salesData.dailyRevenue?.length > 0 ? salesData.dailyRevenue.length : 1;
+  const avgPerDay  = Math.round(salesData.summary.totalRevenue / activeDays);
+  return (
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 md:gap-6">
+      <div className="bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 backdrop-blur-sm p-3 sm:p-6 rounded-xl md:rounded-2xl shadow-lg hover:shadow-xl transition-all duration-200 border border-green-200/50 dark:border-green-700/50 min-w-0">
+        <p className="text-xs sm:text-sm text-green-700 dark:text-green-300 font-semibold mb-1 sm:mb-2 leading-tight truncate">Total Revenue</p>
+        <p className="text-base sm:text-xl md:text-2xl font-bold bg-gradient-to-r from-green-600 to-emerald-700 bg-clip-text text-transparent truncate">₹{formatIndianNumber(salesData.summary.totalRevenue)}</p>
       </div>
-
-      {/* Sales Report Section */}
-      <div className="w-full max-w-7xl mx-auto bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-xl md:rounded-2xl shadow-xl border border-gray-200/50 dark:border-gray-700/50 p-2 sm:p-4 md:p-6 lg:p-8 hover:shadow-2xl transition-all duration-300">
-        <div className="flex items-center gap-2 sm:gap-3 mb-6 md:mb-8">
-          <div className="p-2 sm:p-2.5 md:p-3 bg-gradient-to-r from-green-600 to-emerald-700 rounded-xl shadow-lg">
-            <TrendingUp className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
+      <div className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 backdrop-blur-sm p-3 sm:p-6 rounded-xl md:rounded-2xl shadow-lg hover:shadow-xl transition-all duration-200 border border-blue-200/50 dark:border-blue-700/50 min-w-0">
+        <p className="text-xs sm:text-sm text-blue-700 dark:text-blue-300 font-semibold mb-1 sm:mb-2 leading-tight truncate">Total Items Sold</p>
+        <p className="text-base sm:text-xl md:text-2xl font-bold bg-gradient-to-r from-blue-600 to-indigo-700 bg-clip-text text-transparent truncate">{salesData.summary.totalItems}</p>
+      </div>
+      <div className="bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 backdrop-blur-sm p-3 sm:p-6 rounded-xl md:rounded-2xl shadow-lg hover:shadow-xl transition-all duration-200 border border-purple-200/50 dark:border-purple-700/50 min-w-0">
+        <p className="text-xs sm:text-sm text-purple-700 dark:text-purple-300 font-semibold mb-1 sm:mb-2 leading-tight truncate">Avg Revenue/Item</p>
+        <p className="text-base sm:text-xl md:text-2xl font-bold bg-gradient-to-r from-purple-600 to-pink-700 bg-clip-text text-transparent truncate">₹{formatIndianNumber(salesData.summary.averagePricePerItem)}</p>
+      </div>
+      {(() => {
+        let allDaysCount = activeDays;
+        const s = actualDateRange.startDate || dateRange.startDate;
+        const e = actualDateRange.endDate   || dateRange.endDate;
+        if (s && e) {
+          const diff = Math.round((new Date(e) - new Date(s)) / (1000 * 60 * 60 * 24)) + 1;
+          if (diff > 0) allDaysCount = diff;
+        }
+        const avgAllDays = allDaysCount > 0 ? Math.round(salesData.summary.totalRevenue / allDaysCount) : 0;
+        return (
+          <div className="bg-gradient-to-br from-orange-50 to-amber-50 dark:from-orange-900/20 dark:to-amber-900/20 backdrop-blur-sm p-3 sm:p-6 rounded-xl md:rounded-2xl shadow-lg hover:shadow-xl transition-all duration-200 border border-orange-200/50 dark:border-orange-700/50 min-w-0">
+            <p className="text-xs sm:text-sm text-orange-700 dark:text-orange-300 font-semibold mb-1 sm:mb-2 leading-tight truncate">Avg Sales/Day</p>
+            <p className="text-base sm:text-xl md:text-2xl font-bold bg-gradient-to-r from-orange-600 to-amber-600 bg-clip-text text-transparent truncate">₹{formatIndianNumber(avgPerDay)}</p>
+            <p className="text-xs text-orange-500 dark:text-orange-400 mt-1 truncate">over {activeDays} active {activeDays === 1 ? 'day' : 'days'}</p>
+            {allDaysCount !== activeDays && (
+              <div className="mt-2 pt-2 border-t border-orange-200/50 dark:border-orange-700/50">
+                <p className="text-xs text-orange-400 dark:text-orange-500 truncate">₹{formatIndianNumber(avgAllDays)} / day</p>
+                <p className="text-xs text-orange-400 dark:text-orange-500 truncate">incl. all {allDaysCount} days</p>
+              </div>
+            )}
           </div>
-          <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 dark:text-gray-100">Sales Report</h2>
-        </div>
-        {/* Date Range Selection */}
-        <div className="bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-700 p-3 sm:p-4 md:p-6 rounded-xl md:rounded-2xl mb-6 md:mb-8 border border-gray-200/50 dark:border-gray-600/50 shadow-lg hover:shadow-xl transition-all duration-300">
-          <h3 className="text-base sm:text-lg md:text-xl font-bold text-gray-900 dark:text-gray-100 mb-4 md:mb-6 flex items-center gap-2">
-            <div className="w-3 h-3 bg-gradient-to-r from-blue-400 to-blue-500 rounded-full"></div>
-            Date Range Selection
-          </h3>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3 mb-4 md:mb-6">
-            {['today','week','month','6months','year','alltime'].map((period, i) => (
-              <button key={period} className="bg-white/80 dark:bg-gray-700/80 backdrop-blur-sm border-2 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 hover:border-blue-400 dark:hover:border-blue-500 font-medium px-2 sm:px-3 md:px-4 py-2 sm:py-2.5 rounded-xl shadow-sm hover:shadow-md transition-all duration-200 text-xs sm:text-sm min-h-[44px] flex items-center justify-center" onClick={() => handleQuickDateSelect(period)}>
-                {['Today','Last Week','Last Month','Last 6 Months','Last Year','All Time'][i]}
-              </button>
-            ))}
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
-            <div>
-              <label className="block text-sm font-semibold mb-2 text-gray-700 dark:text-gray-300">Start Date</label>
-              <input type="date" value={dateRange.startDate} onChange={(e) => handleDateRangeChange('startDate', e.target.value)} className="w-full px-3 sm:px-4 py-2.5 sm:py-3 border-2 border-gray-200 dark:border-gray-600 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all duration-200 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm text-gray-900 dark:text-gray-100 text-sm sm:text-base min-h-[44px]" />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold mb-2 text-gray-700 dark:text-gray-300">End Date</label>
-              <input type="date" value={dateRange.endDate} onChange={(e) => handleDateRangeChange('endDate', e.target.value)} className="w-full px-3 sm:px-4 py-2.5 sm:py-3 border-2 border-gray-200 dark:border-gray-600 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all duration-200 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm text-gray-900 dark:text-gray-100 text-sm sm:text-base min-h-[44px]" />
-            </div>
-          </div>
-        </div>
-        {loading.sales ? (
-          <div className="flex items-center justify-center py-12"><LoadingSpinner /></div>
-        ) : salesData ? (
-          <div className="space-y-6 md:space-y-8">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 md:gap-6">
-              <div className="bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 backdrop-blur-sm p-4 sm:p-6 rounded-xl md:rounded-2xl shadow-lg hover:shadow-xl transition-all duration-200 border border-green-200/50 dark:border-green-700/50">
-                <p className="text-sm md:text-base text-green-700 dark:text-green-300 font-semibold mb-2">Total Revenue</p>
-                <p className="text-xl sm:text-2xl md:text-3xl font-bold bg-gradient-to-r from-green-600 to-emerald-700 bg-clip-text text-transparent">₹{salesData.summary.totalRevenue.toLocaleString()}</p>
+        );
+      })()}
+    </div>
+  );
+})()}
+  
+              {/* ── DAILY REVENUE CHART ── */}
+              <div className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 backdrop-blur-sm rounded-xl md:rounded-2xl p-4 sm:p-6 md:p-8 border border-blue-200/50 dark:border-blue-700/50 shadow-lg hover:shadow-xl transition-all duration-300">
+                <h3 className="text-lg sm:text-xl md:text-2xl font-bold text-blue-800 dark:text-blue-200 mb-6 flex items-center gap-2">
+                  <div className="w-3 h-3 bg-gradient-to-r from-blue-400 to-indigo-500 rounded-full"></div>
+                  Daily Revenue Trend
+                </h3>
+                {salesData?.dailyRevenue?.length > 0 ? (
+                  <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-xl p-4 sm:p-6 shadow-lg border border-gray-200/50 dark:border-gray-700/50 overflow-hidden">
+                    <div className="h-[250px] sm:h-[300px] md:h-[350px] overflow-hidden">
+                      <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+                        <LineChart data={salesData.dailyRevenue}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="date" tick={{ fontSize: 10 }} tickFormatter={(value) => { const date = new Date(value); return `${String(date.getDate()).padStart(2,'0')}/${date.toLocaleDateString('en-IN', { month: 'short' })}`; }} />
+                          <YAxis tick={{ fontSize: 10 }} tickFormatter={(value) => `₹${value.toLocaleString('en-IN')}`} />
+                          <Tooltip formatter={(value, name) => { if (name === 'revenue') return [`₹${value.toLocaleString('en-IN')}`, 'Revenue']; if (name === 'transactions') return [value, 'Transactions']; return [value, name]; }} labelFormatter={(label) => { const date = new Date(label); return `${date.toLocaleDateString('en-IN', { weekday: 'long' })}, ${String(date.getDate()).padStart(2,'0')}/${String(date.getMonth()+1).padStart(2,'0')}/${date.getFullYear()}`; }} />
+                          <Line type="monotone" dataKey="revenue" stroke="#1d4ed8" strokeWidth={2} dot={{ fill: '#1d4ed8', strokeWidth: 2, r: 3 }} activeDot={{ r: 5 }} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center h-[250px] sm:h-[300px] bg-white/60 dark:bg-gray-800/60 backdrop-blur-sm rounded-xl border border-gray-200/50 dark:border-gray-700/50">
+                    <p className="text-base sm:text-lg text-gray-500 dark:text-gray-400">No sales data available for the selected time period</p>
+                  </div>
+                )}
               </div>
-              <div className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 backdrop-blur-sm p-4 sm:p-6 rounded-xl md:rounded-2xl shadow-lg hover:shadow-xl transition-all duration-200 border border-blue-200/50 dark:border-blue-700/50">
-                <p className="text-sm md:text-base text-blue-700 dark:text-blue-300 font-semibold mb-2">Total Items Sold</p>
-                <p className="text-xl sm:text-2xl md:text-3xl font-bold bg-gradient-to-r from-blue-600 to-indigo-700 bg-clip-text text-transparent">{salesData.summary.totalItems}</p>
-              </div>
-              <div className="bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 backdrop-blur-sm p-4 sm:p-6 rounded-xl md:rounded-2xl shadow-lg hover:shadow-xl transition-all duration-200 border border-purple-200/50 dark:border-purple-700/50 sm:col-span-2 lg:col-span-1">
-                <p className="text-sm md:text-base text-purple-700 dark:text-purple-300 font-semibold mb-2">Avg Revenue/Item</p>
-                <p className="text-xl sm:text-2xl md:text-3xl font-bold bg-gradient-to-r from-purple-600 to-pink-700 bg-clip-text text-transparent">₹{salesData.summary.averagePricePerItem.toLocaleString()}</p>
-              </div>
-            </div>
-
-            {/* Revenue Chart */}
-            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 backdrop-blur-sm rounded-xl md:rounded-2xl p-4 sm:p-6 md:p-8 border border-blue-200/50 dark:border-blue-700/50 shadow-lg hover:shadow-xl transition-all duration-300">
-              <h3 className="text-lg sm:text-xl md:text-2xl font-bold text-blue-800 dark:text-blue-200 mb-6 flex items-center gap-2">
-                <div className="w-3 h-3 bg-gradient-to-r from-blue-400 to-indigo-500 rounded-full"></div>
-                Daily Revenue Trend
-              </h3>
-              {salesData?.dailyRevenue?.length > 0 ? (
-                <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-xl p-4 sm:p-6 shadow-lg border border-gray-200/50 dark:border-gray-700/50 overflow-hidden">
-                  <div className="h-[250px] sm:h-[300px] md:h-[350px] overflow-hidden">
-                    <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                      <LineChart data={salesData.dailyRevenue}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="date" tick={{ fontSize: 10 }} tickFormatter={(value) => { const date = new Date(value); return `${String(date.getDate()).padStart(2,'0')}/${date.toLocaleDateString('en-IN', { month: 'short' })}`; }} />
-                        <YAxis tick={{ fontSize: 10 }} tickFormatter={(value) => `₹${value.toLocaleString('en-IN')}`} />
-                        <Tooltip formatter={(value, name) => { if (name === 'revenue') return [`₹${value.toLocaleString('en-IN')}`, 'Revenue']; if (name === 'transactions') return [value, 'Transactions']; return [value, name]; }} labelFormatter={(label) => { const date = new Date(label); return `${date.toLocaleDateString('en-IN', { weekday: 'long' })}, ${String(date.getDate()).padStart(2,'0')}/${String(date.getMonth()+1).padStart(2,'0')}/${date.getFullYear()}`; }} />
-                        <Line type="monotone" dataKey="revenue" stroke="#1d4ed8" strokeWidth={2} dot={{ fill: '#1d4ed8', strokeWidth: 2, r: 3 }} activeDot={{ r: 5 }} />
-                      </LineChart>
-                    </ResponsiveContainer>
+  
+              {/* ── METAL-WISE BREAKDOWN ── */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+                <div className="bg-gradient-to-br from-yellow-50 to-amber-50 dark:from-yellow-900/20 dark:to-amber-900/20 backdrop-blur-sm p-4 sm:p-6 md:p-8 rounded-xl md:rounded-2xl border border-yellow-200/50 dark:border-yellow-700/50 shadow-lg hover:shadow-xl transition-all duration-300">
+                  <h4 className="text-lg sm:text-xl md:text-2xl font-bold text-yellow-800 dark:text-yellow-200 mb-6 flex items-center gap-2"><div className="w-3 h-3 bg-gradient-to-r from-yellow-400 to-amber-500 rounded-full"></div>Gold Sales</h4>
+                  <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-xl p-4 sm:p-6 shadow-lg border border-gray-200/50 dark:border-gray-700/50">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div><p className="text-base sm:text-lg font-bold text-yellow-800 dark:text-yellow-200 truncate">₹{formatIndianNumber(salesData.byMetal.gold.totalRevenue)}</p>
+</div>
+                      <div><p className="text-xs sm:text-sm text-yellow-700 dark:text-yellow-300 font-medium mb-1">Gross Weight</p><p className="text-base sm:text-lg font-bold text-yellow-800 dark:text-yellow-200">{salesData.byMetal.gold.totalWeight} g</p></div>
+                      <div><p className="text-xs sm:text-sm text-yellow-700 dark:text-yellow-300 font-medium mb-1">Pure Weight</p><p className="text-base sm:text-lg font-bold text-yellow-800 dark:text-yellow-200">{salesData.byMetal.gold.totalPureWeight} g</p></div>
+                      <div><p className="text-xs sm:text-sm text-yellow-700 dark:text-yellow-300 font-medium mb-1">Sales Count</p><p className="text-base sm:text-lg font-bold text-yellow-800 dark:text-yellow-200">{salesData.byMetal.gold.totalSalesCount}</p></div>
+                    </div>
                   </div>
                 </div>
-              ) : (
-                <div className="flex items-center justify-center h-[250px] sm:h-[300px] bg-white/60 dark:bg-gray-800/60 backdrop-blur-sm rounded-xl border border-gray-200/50 dark:border-gray-700/50">
-                  <p className="text-base sm:text-lg text-gray-500 dark:text-gray-400">No sales data available for the selected time period</p>
-                </div>
-              )}
-            </div>
-
-            {/* Metal-wise Breakdown */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
-              <div className="bg-gradient-to-br from-yellow-50 to-amber-50 dark:from-yellow-900/20 dark:to-amber-900/20 backdrop-blur-sm p-4 sm:p-6 md:p-8 rounded-xl md:rounded-2xl border border-yellow-200/50 dark:border-yellow-700/50 shadow-lg hover:shadow-xl transition-all duration-300">
-                <h4 className="text-lg sm:text-xl md:text-2xl font-bold text-yellow-800 dark:text-yellow-200 mb-6 flex items-center gap-2"><div className="w-3 h-3 bg-gradient-to-r from-yellow-400 to-amber-500 rounded-full"></div>Gold Sales</h4>
-                <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-xl p-4 sm:p-6 shadow-lg border border-gray-200/50 dark:border-gray-700/50">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div><p className="text-xs sm:text-sm text-yellow-700 dark:text-yellow-300 font-medium mb-1">Revenue</p><p className="text-base sm:text-lg font-bold text-yellow-800 dark:text-yellow-200">₹{salesData.byMetal.gold.totalRevenue.toLocaleString()}</p></div>
-                    <div><p className="text-xs sm:text-sm text-yellow-700 dark:text-yellow-300 font-medium mb-1">Gross Weight</p><p className="text-base sm:text-lg font-bold text-yellow-800 dark:text-yellow-200">{salesData.byMetal.gold.totalWeight} g</p></div>
-                    <div><p className="text-xs sm:text-sm text-yellow-700 dark:text-yellow-300 font-medium mb-1">Pure Weight</p><p className="text-base sm:text-lg font-bold text-yellow-800 dark:text-yellow-200">{salesData.byMetal.gold.totalPureWeight} g</p></div>
-                    <div><p className="text-xs sm:text-sm text-yellow-700 dark:text-yellow-300 font-medium mb-1">Sales Count</p><p className="text-base sm:text-lg font-bold text-yellow-800 dark:text-yellow-200">{salesData.byMetal.gold.totalSalesCount}</p></div>
+                <div className="bg-gradient-to-br from-gray-50 to-slate-50 dark:from-gray-800 dark:to-slate-800 backdrop-blur-sm p-4 sm:p-6 md:p-8 rounded-xl md:rounded-2xl border border-gray-200/50 dark:border-gray-600/50 shadow-lg hover:shadow-xl transition-all duration-300">
+                  <h4 className="text-lg sm:text-xl md:text-2xl font-bold text-gray-800 dark:text-gray-200 mb-6 flex items-center gap-2"><div className="w-3 h-3 bg-gradient-to-r from-gray-400 to-slate-500 rounded-full"></div>Silver Sales</h4>
+                  <div className="bg-white/80 dark:bg-gray-700/80 backdrop-blur-sm rounded-xl p-4 sm:p-6 shadow-lg border border-gray-200/50 dark:border-gray-600/50">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div><p className="text-base sm:text-lg font-bold text-gray-800 dark:text-gray-200 truncate">₹{formatIndianNumber(salesData.byMetal.silver.totalRevenue)}</p>
+</div>
+                      <div><p className="text-xs sm:text-sm text-gray-700 dark:text-gray-300 font-medium mb-1">Gross Weight</p><p className="text-base sm:text-lg font-bold text-gray-800 dark:text-gray-200">{salesData.byMetal.silver.totalWeight} g</p></div>
+                      <div><p className="text-xs sm:text-sm text-gray-700 dark:text-gray-300 font-medium mb-1">Pure Weight</p><p className="text-base sm:text-lg font-bold text-gray-800 dark:text-gray-200">{salesData.byMetal.silver.totalPureWeight} g</p></div>
+                      <div><p className="text-xs sm:text-sm text-gray-700 dark:text-gray-300 font-medium mb-1">Sales Count</p><p className="text-base sm:text-lg font-bold text-gray-800 dark:text-gray-200">{salesData.byMetal.silver.totalSalesCount}</p></div>
+                    </div>
                   </div>
                 </div>
               </div>
-              <div className="bg-gradient-to-br from-gray-50 to-slate-50 dark:from-gray-800 dark:to-slate-800 backdrop-blur-sm p-4 sm:p-6 md:p-8 rounded-xl md:rounded-2xl border border-gray-200/50 dark:border-gray-600/50 shadow-lg hover:shadow-xl transition-all duration-300">
-                <h4 className="text-lg sm:text-xl md:text-2xl font-bold text-gray-800 dark:text-gray-200 mb-6 flex items-center gap-2"><div className="w-3 h-3 bg-gradient-to-r from-gray-400 to-slate-500 rounded-full"></div>Silver Sales</h4>
-                <div className="bg-white/80 dark:bg-gray-700/80 backdrop-blur-sm rounded-xl p-4 sm:p-6 shadow-lg border border-gray-200/50 dark:border-gray-600/50">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div><p className="text-xs sm:text-sm text-gray-700 dark:text-gray-300 font-medium mb-1">Revenue</p><p className="text-base sm:text-lg font-bold text-gray-800 dark:text-gray-200">₹{salesData.byMetal.silver.totalRevenue.toLocaleString()}</p></div>
-                    <div><p className="text-xs sm:text-sm text-gray-700 dark:text-gray-300 font-medium mb-1">Gross Weight</p><p className="text-base sm:text-lg font-bold text-gray-800 dark:text-gray-200">{salesData.byMetal.silver.totalWeight} g</p></div>
-                    <div><p className="text-xs sm:text-sm text-gray-700 dark:text-gray-300 font-medium mb-1">Pure Weight</p><p className="text-base sm:text-lg font-bold text-gray-800 dark:text-gray-200">{salesData.byMetal.silver.totalPureWeight} g</p></div>
-                    <div><p className="text-xs sm:text-sm text-gray-700 dark:text-gray-300 font-medium mb-1">Sales Count</p><p className="text-base sm:text-lg font-bold text-gray-800 dark:text-gray-200">{salesData.byMetal.silver.totalSalesCount}</p></div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {salesData.topPerformers && salesData.topPerformers.length > 0 && (
-              <div className="space-y-6 md:space-y-8">
-                <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm rounded-xl md:rounded-2xl overflow-hidden shadow-lg border border-gray-200/50 dark:border-gray-700/50">
-                  <h4 className="text-base sm:text-lg md:text-xl font-bold p-4 sm:p-6 bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-700 text-gray-900 dark:text-gray-100 border-b border-gray-200 dark:border-gray-600 flex items-center gap-2"><div className="w-3 h-3 bg-gradient-to-r from-green-400 to-emerald-500 rounded-full"></div>Top Revenue Generators</h4>
-                  <div className="hidden md:block">
-                    <table className="w-full text-sm md:text-base">
-                      <thead className="bg-gradient-to-r from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-600">
-                        <tr>
-                          <th className="text-left p-4 font-semibold text-gray-900 dark:text-gray-100">Metal</th>
-                          <th className="text-left p-4 font-semibold text-gray-900 dark:text-gray-100">Category</th>
-                          <th className="text-center p-4 font-semibold text-gray-900 dark:text-gray-100">Purity</th>
-                          <th className="text-right p-4 font-semibold text-gray-900 dark:text-gray-100">Revenue</th>
-                          <th className="text-right p-4 font-semibold text-gray-900 dark:text-gray-100">Weight</th>
-                          <th className="text-right p-4 font-semibold text-gray-900 dark:text-gray-100">Quantity</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {salesData.topPerformers.slice(0, 10).map((item, index) => (
-                          <tr key={index} className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50/80 dark:hover:bg-gray-700/50 transition-colors duration-200">
-                            <td className="p-4 capitalize font-semibold text-gray-900 dark:text-gray-100">{item.metalType}</td>
-                            <td className="p-4 text-gray-900 dark:text-gray-100">{item.category}</td>
-                            <td className="p-4 text-center font-bold text-blue-600 dark:text-blue-400">{item.purity}%</td>
-                            <td className="p-4 text-right font-bold text-green-600 dark:text-green-400">₹{item.totalSalesAmount.toLocaleString()}</td>
-                            <td className="p-4 text-right text-gray-700 dark:text-gray-300">{item.totalGrossWeight} g</td>
-                            <td className="p-4 text-right text-gray-700 dark:text-gray-300">{item.totalItems}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  <div className="block md:hidden space-y-3 p-4">
-                    {salesData.topPerformers.slice(0, 10).map((item, index) => (
-                      <div key={index} className="bg-white/60 dark:bg-gray-700/60 backdrop-blur-sm rounded-lg p-4 border border-gray-200/50 dark:border-gray-600/50">
-                        <h5 className="font-bold text-gray-900 dark:text-gray-100 mb-3 capitalize">{item.metalType} - {item.category}</h5>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div><p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Purity</p><p className="text-sm font-bold text-blue-600 dark:text-blue-400">{item.purity}%</p></div>
-                          <div><p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Revenue</p><p className="text-sm font-bold text-green-600 dark:text-green-400">₹{item.totalSalesAmount.toLocaleString()}</p></div>
-                          <div><p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Weight</p><p className="text-sm font-semibold text-gray-700 dark:text-gray-300">{item.totalGrossWeight} g</p></div>
-                          <div><p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Quantity</p><p className="text-sm font-semibold text-gray-700 dark:text-gray-300">{item.totalItems}</p></div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {salesData.topQuantityItems && salesData.topQuantityItems.length > 0 && (
+  
+              {/* ── TOP PERFORMERS ── */}
+              {salesData.topPerformers && salesData.topPerformers.length > 0 && (
+                <div className="space-y-6 md:space-y-8">
+                  {/* Top Revenue */}
                   <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm rounded-xl md:rounded-2xl overflow-hidden shadow-lg border border-gray-200/50 dark:border-gray-700/50">
-                    <h4 className="text-base sm:text-lg md:text-xl font-bold p-4 sm:p-6 bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-700 text-gray-900 dark:text-gray-100 border-b border-gray-200 dark:border-gray-600 flex items-center gap-2"><div className="w-3 h-3 bg-gradient-to-r from-purple-400 to-pink-500 rounded-full"></div>Top Sold Quantity Items</h4>
+                    <h4 className="text-base sm:text-lg md:text-xl font-bold p-4 sm:p-6 bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-700 text-gray-900 dark:text-gray-100 border-b border-gray-200 dark:border-gray-600 flex items-center gap-2"><div className="w-3 h-3 bg-gradient-to-r from-green-400 to-emerald-500 rounded-full"></div>Top Revenue Generators</h4>
                     <div className="hidden md:block">
                       <table className="w-full text-sm md:text-base">
                         <thead className="bg-gradient-to-r from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-600">
@@ -1427,274 +1489,327 @@ const generateCustomerPDFReport = async (reportData, filename, selectedFields) =
                             <th className="text-left p-4 font-semibold text-gray-900 dark:text-gray-100">Metal</th>
                             <th className="text-left p-4 font-semibold text-gray-900 dark:text-gray-100">Category</th>
                             <th className="text-center p-4 font-semibold text-gray-900 dark:text-gray-100">Purity</th>
-                            <th className="text-right p-4 font-semibold text-gray-900 dark:text-gray-100">Quantity</th>
-                            <th className="text-right p-4 font-semibold text-gray-900 dark:text-gray-100">Weight</th>
                             <th className="text-right p-4 font-semibold text-gray-900 dark:text-gray-100">Revenue</th>
+                            <th className="text-right p-4 font-semibold text-gray-900 dark:text-gray-100">Weight</th>
+                            <th className="text-right p-4 font-semibold text-gray-900 dark:text-gray-100">Quantity</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {salesData.topQuantityItems.slice(0, 10).map((item, index) => (
+                          {salesData.topPerformers.slice(0, 10).map((item, index) => (
                             <tr key={index} className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50/80 dark:hover:bg-gray-700/50 transition-colors duration-200">
                               <td className="p-4 capitalize font-semibold text-gray-900 dark:text-gray-100">{item.metalType}</td>
                               <td className="p-4 text-gray-900 dark:text-gray-100">{item.category}</td>
                               <td className="p-4 text-center font-bold text-blue-600 dark:text-blue-400">{item.purity}%</td>
-                              <td className="p-4 text-right font-bold text-purple-600 dark:text-purple-400">{item.totalItems}</td>
+                              <td className="p-4 text-right font-bold text-green-600 dark:text-green-400">₹{formatIndianNumber(item.totalSalesAmount)}</td>
+
                               <td className="p-4 text-right text-gray-700 dark:text-gray-300">{item.totalGrossWeight} g</td>
-                              <td className="p-4 text-right text-gray-700 dark:text-gray-300">₹{item.totalSalesAmount.toLocaleString()}</td>
+                              <td className="p-4 text-right text-gray-700 dark:text-gray-300">{item.totalItems}</td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
                     </div>
                     <div className="block md:hidden space-y-3 p-4">
-                      {salesData.topQuantityItems.slice(0, 10).map((item, index) => (
+                      {salesData.topPerformers.slice(0, 10).map((item, index) => (
                         <div key={index} className="bg-white/60 dark:bg-gray-700/60 backdrop-blur-sm rounded-lg p-4 border border-gray-200/50 dark:border-gray-600/50">
                           <h5 className="font-bold text-gray-900 dark:text-gray-100 mb-3 capitalize">{item.metalType} - {item.category}</h5>
                           <div className="grid grid-cols-2 gap-3">
                             <div><p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Purity</p><p className="text-sm font-bold text-blue-600 dark:text-blue-400">{item.purity}%</p></div>
-                            <div><p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Quantity</p><p className="text-sm font-bold text-purple-600 dark:text-purple-400">{item.totalItems}</p></div>
+                            <div><p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Revenue</p><p className="text-sm font-bold text-green-600 dark:text-green-400">₹{item.totalSalesAmount.toLocaleString()}</p></div>
                             <div><p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Weight</p><p className="text-sm font-semibold text-gray-700 dark:text-gray-300">{item.totalGrossWeight} g</p></div>
-                            <div><p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Revenue</p><p className="text-sm font-semibold text-gray-700 dark:text-gray-300">₹{item.totalSalesAmount.toLocaleString()}</p></div>
+                            <div><p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Quantity</p><p className="text-sm font-semibold text-gray-700 dark:text-gray-300">{item.totalItems}</p></div>
                           </div>
                         </div>
                       ))}
                     </div>
                   </div>
-                )}
-
-                <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 md:gap-8">
-                  <div className="bg-gradient-to-br from-yellow-50 to-amber-50 dark:from-yellow-900/20 dark:to-amber-900/20 backdrop-blur-sm rounded-xl md:rounded-2xl p-4 sm:p-6 md:p-8 border border-yellow-200/50 dark:border-yellow-700/50 shadow-lg hover:shadow-xl transition-all duration-300">
-                    <h4 className="text-base sm:text-lg md:text-xl font-bold text-yellow-800 dark:text-yellow-200 mb-6 flex items-center gap-2"><div className="w-3 h-3 bg-gradient-to-r from-yellow-400 to-amber-500 rounded-full"></div>Gold Weight Leaders</h4>
-                    {salesData.goldWeightLeaders && salesData.goldWeightLeaders.length > 0 ? (
-                      <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-lg border border-gray-200/50 dark:border-gray-700/50 overflow-hidden">
-                        <div className="hidden sm:block">
-                          <table className="w-full text-sm">
-                            <thead className="bg-gradient-to-r from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-600">
-                              <tr>
-                                <th className="text-left p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">Category</th>
-                                <th className="text-center p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">Purity</th>
-                                <th className="text-right p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">Weight</th>
-                                <th className="text-right p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">Revenue</th>
+  
+                  {/* Top Quantity */}
+                  {salesData.topQuantityItems && salesData.topQuantityItems.length > 0 && (
+                    <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm rounded-xl md:rounded-2xl overflow-hidden shadow-lg border border-gray-200/50 dark:border-gray-700/50">
+                      <h4 className="text-base sm:text-lg md:text-xl font-bold p-4 sm:p-6 bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-700 text-gray-900 dark:text-gray-100 border-b border-gray-200 dark:border-gray-600 flex items-center gap-2"><div className="w-3 h-3 bg-gradient-to-r from-purple-400 to-pink-500 rounded-full"></div>Top Sold Quantity Items</h4>
+                      <div className="hidden md:block">
+                        <table className="w-full text-sm md:text-base">
+                          <thead className="bg-gradient-to-r from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-600">
+                            <tr>
+                              <th className="text-left p-4 font-semibold text-gray-900 dark:text-gray-100">Metal</th>
+                              <th className="text-left p-4 font-semibold text-gray-900 dark:text-gray-100">Category</th>
+                              <th className="text-center p-4 font-semibold text-gray-900 dark:text-gray-100">Purity</th>
+                              <th className="text-right p-4 font-semibold text-gray-900 dark:text-gray-100">Quantity</th>
+                              <th className="text-right p-4 font-semibold text-gray-900 dark:text-gray-100">Weight</th>
+                              <th className="text-right p-4 font-semibold text-gray-900 dark:text-gray-100">Revenue</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {salesData.topQuantityItems.slice(0, 10).map((item, index) => (
+                              <tr key={index} className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50/80 dark:hover:bg-gray-700/50 transition-colors duration-200">
+                                <td className="p-4 capitalize font-semibold text-gray-900 dark:text-gray-100">{item.metalType}</td>
+                                <td className="p-4 text-gray-900 dark:text-gray-100">{item.category}</td>
+                                <td className="p-4 text-center font-bold text-blue-600 dark:text-blue-400">{item.purity}%</td>
+                                <td className="p-4 text-right font-bold text-purple-600 dark:text-purple-400">{item.totalItems}</td>
+                                <td className="p-4 text-right text-gray-700 dark:text-gray-300">{item.totalGrossWeight} g</td>
+                                <td className="p-4 text-right text-gray-700 dark:text-gray-300">₹{item.totalSalesAmount.toLocaleString()}</td>
                               </tr>
-                            </thead>
-                            <tbody>
-                              {salesData.goldWeightLeaders.slice(0, 5).map((item, index) => (
-                                <tr key={index} className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50/80 dark:hover:bg-gray-700/50 transition-colors duration-200">
-                                  <td className="p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">{item.category}</td>
-                                  <td className="p-3 md:p-4 text-center font-bold text-yellow-600 dark:text-yellow-400">{item.purity}%</td>
-                                  <td className="p-3 md:p-4 text-right font-bold text-amber-600 dark:text-amber-400">{item.totalGrossWeight} g</td>
-                                  <td className="p-3 md:p-4 text-right text-gray-700 dark:text-gray-300">₹{item.totalSalesAmount.toLocaleString()}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
+                            ))}
+                          </tbody>
+                        </table>
                       </div>
-                    ) : (
-                      <div className="flex items-center justify-center h-[200px] bg-white/60 dark:bg-gray-800/60 backdrop-blur-sm rounded-xl border border-gray-200/50 dark:border-gray-700/50">
-                        <p className="text-sm text-gray-500 dark:text-gray-400 text-center px-4">No gold weight data available</p>
-                      </div>
-                    )}
-                  </div>
-                  <div className="bg-gradient-to-br from-gray-50 to-slate-50 dark:from-gray-800 dark:to-slate-800 backdrop-blur-sm rounded-xl md:rounded-2xl p-4 sm:p-6 md:p-8 border border-gray-200/50 dark:border-gray-600/50 shadow-lg hover:shadow-xl transition-all duration-300">
-                    <h4 className="text-base sm:text-lg md:text-xl font-bold text-gray-800 dark:text-gray-200 mb-6 flex items-center gap-2"><div className="w-3 h-3 bg-gradient-to-r from-gray-400 to-slate-500 rounded-full"></div>Silver Weight Leaders</h4>
-                    {salesData.silverWeightLeaders && salesData.silverWeightLeaders.length > 0 ? (
-                      <div className="bg-white/80 dark:bg-gray-700/80 backdrop-blur-sm rounded-xl shadow-lg border border-gray-200/50 dark:border-gray-600/50 overflow-hidden">
-                        <div className="hidden sm:block">
-                          <table className="w-full text-sm">
-                            <thead className="bg-gradient-to-r from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-600">
-                              <tr>
-                                <th className="text-left p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">Category</th>
-                                <th className="text-center p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">Purity</th>
-                                <th className="text-right p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">Weight</th>
-                                <th className="text-right p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">Revenue</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {salesData.silverWeightLeaders.slice(0, 5).map((item, index) => (
-                                <tr key={index} className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50/80 dark:hover:bg-gray-700/50 transition-colors duration-200">
-                                  <td className="p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">{item.category}</td>
-                                  <td className="p-3 md:p-4 text-center font-bold text-gray-600 dark:text-gray-400">{item.purity}%</td>
-                                  <td className="p-3 md:p-4 text-right font-bold text-slate-600 dark:text-slate-400">{item.totalGrossWeight} g</td>
-                                  <td className="p-3 md:p-4 text-right text-gray-700 dark:text-gray-300">₹{item.totalSalesAmount.toLocaleString()}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex items-center justify-center h-[200px] bg-white/60 dark:bg-gray-700/60 backdrop-blur-sm rounded-xl border border-gray-200/50 dark:border-gray-600/50">
-                        <p className="text-sm text-gray-500 dark:text-gray-400 text-center px-4">No silver weight data available</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <div className="flex flex-col gap-3 pt-6 border-t border-gray-200/50 dark:border-gray-700/50">
-              <button onClick={() => setDownloadModal({ open: true, type: 'sales', data: salesData })} className="w-full bg-gradient-to-r from-green-600 to-emerald-700 hover:from-green-700 hover:to-emerald-800 text-white font-semibold px-6 py-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 flex items-center justify-center gap-2 min-h-[48px]">
-                <Download className="h-5 w-5" /><span>Download Sales Report</span>
-              </button>
-              <label className="flex items-center justify-center gap-3 cursor-pointer p-3 bg-white/60 dark:bg-gray-800/60 backdrop-blur-sm rounded-xl border border-gray-200/50 dark:border-gray-700/50 hover:bg-white/80 dark:hover:bg-gray-800/80 transition-all duration-200">
-                <input type="checkbox" checked={includeEntries} onChange={(e) => setIncludeEntries(e.target.checked)} className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2 dark:bg-gray-700 dark:border-gray-600" />
-                <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">Include Related Entries</span>
-              </label>
-            </div>
-          </div>
-        ) : (
-          <div className="flex items-center justify-center py-12 bg-white/60 dark:bg-gray-800/60 backdrop-blur-sm rounded-xl border border-gray-200/50 dark:border-gray-700/50">
-            <p className="text-gray-500 dark:text-gray-400 text-lg text-center px-4">No sales data available</p>
-          </div>
-        )}
-      </div>
-
-      {/* Customer List Report Section */}
-      <div className="w-full max-w-7xl mx-auto bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-xl md:rounded-2xl shadow-xl border border-gray-200/50 dark:border-gray-700/50 p-2 sm:p-4 md:p-6 lg:p-8 hover:shadow-2xl transition-all duration-300">
-        <div className="flex items-center gap-2 sm:gap-3 mb-6 md:mb-8">
-          <div className="p-2 sm:p-2.5 md:p-3 bg-gradient-to-r from-purple-600 to-pink-700 rounded-xl shadow-lg">
-            <Users className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
-          </div>
-          <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 dark:text-gray-100">Customer List Report</h2>
-        </div>
-        <div className="bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 backdrop-blur-sm p-4 sm:p-6 md:p-8 rounded-xl md:rounded-2xl mb-6 md:mb-8 border border-purple-200/50 dark:border-purple-700/50 shadow-lg hover:shadow-xl transition-all duration-300">
-          <h3 className="text-lg sm:text-xl md:text-2xl font-bold text-purple-800 dark:text-purple-200 mb-6 flex items-center gap-2"><div className="w-3 h-3 bg-gradient-to-r from-purple-400 to-pink-500 rounded-full"></div>Select Fields to Include</h3>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 md:gap-4">
-            {Object.entries(customerFields).map(([field, checked]) => (
-              <label key={field} className="flex items-center gap-2 cursor-pointer group p-3 bg-white/60 dark:bg-gray-800/60 backdrop-blur-sm rounded-xl border border-gray-200/50 dark:border-gray-700/50 hover:bg-white/80 dark:hover:bg-gray-800/80 transition-all duration-200">
-                <input type="checkbox" checked={checked} onChange={(e) => setCustomerFields(prev => ({ ...prev, [field]: e.target.checked }))} className="w-4 h-4 text-purple-600 bg-gray-100 border-gray-300 rounded focus:ring-purple-500 focus:ring-2 dark:bg-gray-700 dark:border-gray-600" />
-                <span className="text-sm font-semibold capitalize text-gray-700 group-hover:text-gray-900 transition-colors duration-200 dark:text-gray-300 dark:group-hover:text-gray-100">
-                  {field === 'purchaseAmount' ? 'Purchase Amount' : field === 'purchaseItems' ? 'Purchase Items' : field}
-                </span>
-              </label>
-            ))}
-          </div>
-        </div>
-        {loading.customers ? (
-          <div className="flex items-center justify-center py-12"><LoadingSpinner /></div>
-        ) : customersData ? (
-          <div className="space-y-6 md:space-y-8">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 md:gap-6">
-              <div className="bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 backdrop-blur-sm p-4 sm:p-6 rounded-xl md:rounded-2xl shadow-lg hover:shadow-xl transition-all duration-200 border border-purple-200/50 dark:border-purple-700/50">
-                <p className="text-sm md:text-base text-purple-700 dark:text-purple-300 font-semibold mb-2">Total Customers</p>
-                <p className="text-xl sm:text-2xl md:text-3xl font-bold bg-gradient-to-r from-purple-600 to-pink-700 bg-clip-text text-transparent">{customersData.totalCustomers}</p>
-              </div>
-              <div className="bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 backdrop-blur-sm p-4 sm:p-6 rounded-xl md:rounded-2xl shadow-lg hover:shadow-xl transition-all duration-200 border border-purple-200/50 dark:border-purple-700/50">
-                <p className="text-sm md:text-base text-purple-700 dark:text-purple-300 font-semibold mb-2">Total Revenue</p>
-                <p className="text-xl sm:text-2xl md:text-3xl font-bold bg-gradient-to-r from-purple-600 to-pink-700 bg-clip-text text-transparent">₹{customersData.summary.totalRevenue.toLocaleString()}</p>
-              </div>
-              <div className="bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 backdrop-blur-sm p-4 sm:p-6 rounded-xl md:rounded-2xl shadow-lg hover:shadow-xl transition-all duration-200 border border-purple-200/50 dark:border-purple-700/50">
-                <p className="text-sm md:text-base text-purple-700 dark:text-purple-300 font-semibold mb-2">Avg Customer Value</p>
-                <p className="text-xl sm:text-2xl md:text-3xl font-bold bg-gradient-to-r from-purple-600 to-pink-700 bg-clip-text text-transparent">₹{customersData.summary.averageCustomerValue.toLocaleString()}</p>
-              </div>
-            </div>
-            {customersData.customers.length > 0 && (
-              <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm rounded-xl md:rounded-2xl overflow-hidden shadow-lg border border-gray-200/50 dark:border-gray-700/50">
-                <h4 className="text-base sm:text-lg md:text-xl font-bold p-4 sm:p-6 bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-700 text-gray-900 dark:text-gray-100 border-b border-gray-200 dark:border-gray-600 flex items-center gap-2"><div className="w-3 h-3 bg-gradient-to-r from-purple-400 to-pink-500 rounded-full"></div>Customer List</h4>
-                <div className="hidden md:block">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm md:text-base min-w-[700px]">
-                      <thead className="bg-gradient-to-r from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-600">
-                        <tr>
-                          {customerFields.name && <th className="text-left p-4 font-semibold text-gray-900 dark:text-gray-100">Name</th>}
-                          {customerFields.mobile && <th className="text-left p-4 font-semibold text-gray-900 dark:text-gray-100">Mobile</th>}
-                          {customerFields.address && <th className="text-left p-4 font-semibold text-gray-900 dark:text-gray-100">Address</th>}
-                          {customerFields.purchaseAmount && (<><th className="text-right p-4 font-semibold text-gray-900 dark:text-gray-100">Total Purchase</th><th className="text-right p-4 font-semibold text-gray-900 dark:text-gray-100">Transactions</th><th className="text-right p-4 font-semibold text-gray-900 dark:text-gray-100">Avg Purchase</th></>)}
-                          {customerFields.purchaseItems && <th className="text-left p-4 font-semibold text-gray-900 dark:text-gray-100">Purchase Items</th>}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {customersData.customers.slice(0, 50).map((customer, index) => (
-                          <tr key={index} className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50/80 dark:hover:bg-gray-700/50 transition-colors duration-200">
-                            {customerFields.name && <td className="p-4 font-semibold text-gray-900 dark:text-gray-100">{customer.customerName || 'N/A'}</td>}
-                            {customerFields.mobile && <td className="p-4 text-gray-900 dark:text-gray-100">{customer.customerMobile || 'N/A'}</td>}
-                            {customerFields.address && <td className="p-4 text-gray-900 dark:text-gray-100">{customer.customerAddress || 'N/A'}</td>}
-                            {customerFields.purchaseAmount && (<><td className="p-4 text-right font-bold text-purple-600 dark:text-purple-400">₹{customer.totalPurchaseAmount?.toLocaleString() || 0}</td><td className="p-4 text-right text-gray-700 dark:text-gray-300">{customer.transactionCount || 0}</td><td className="p-4 text-right font-semibold text-gray-700 dark:text-gray-300">₹{customer.averagePurchaseValue?.toLocaleString() || 0}</td></>)}
-                            {customerFields.purchaseItems && (
-                              <td className="p-4">
-                                <div className="max-w-xs">
-                                  {customer.purchaseItems && customer.purchaseItems.length > 0 ? (
-                                    <div className="space-y-1">{customer.purchaseItems.map((item, itemIndex) => (<div key={itemIndex} className="text-xs bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 backdrop-blur-sm p-2 rounded-lg border border-purple-200/50 dark:border-purple-700/50 text-purple-700 dark:text-purple-300">{item}</div>))}</div>
-                                  ) : (<span className="text-gray-500 dark:text-gray-400">No items</span>)}
-                                </div>
-                              </td>
-                            )}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-                <div className="block md:hidden space-y-3 p-4">
-                  {customersData.customers.slice(0, 50).map((customer, index) => (
-                    <div key={index} className="bg-white/60 dark:bg-gray-700/60 backdrop-blur-sm rounded-lg p-4 border border-gray-200/50 dark:border-gray-600/50">
-                      <h5 className="font-bold text-gray-900 dark:text-gray-100 mb-3">{customer.customerName || 'Unknown Customer'}</h5>
-                      <div className="grid grid-cols-2 gap-3">
-                        {customerFields.mobile && <div><p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Mobile</p><p className="text-sm font-semibold text-gray-700 dark:text-gray-300">{customer.customerMobile || 'N/A'}</p></div>}
-                        {customerFields.purchaseAmount && <div><p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Total Purchase</p><p className="text-sm font-bold text-purple-600 dark:text-purple-400">₹{customer.totalPurchaseAmount?.toLocaleString() || 0}</p></div>}
-                        {customerFields.purchaseAmount && <div><p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Transactions</p><p className="text-sm font-semibold text-gray-700 dark:text-gray-300">{customer.transactionCount || 0}</p></div>}
-                        {customerFields.purchaseAmount && <div><p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Avg Purchase</p><p className="text-sm font-semibold text-gray-700 dark:text-gray-300">₹{customer.averagePurchaseValue?.toLocaleString() || 0}</p></div>}
-                      </div>
-                      {customerFields.address && <div className="mt-3 pt-3 border-t border-gray-200/50 dark:border-gray-600/50"><p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Address</p><p className="text-sm text-gray-700 dark:text-gray-300">{customer.customerAddress || 'N/A'}</p></div>}
-                      {customerFields.purchaseItems && customer.purchaseItems && customer.purchaseItems.length > 0 && (
-                        <div className="mt-3 pt-3 border-t border-gray-200/50 dark:border-gray-600/50">
-                          <p className="text-xs text-gray-600 dark:text-gray-400 font-medium mb-2">Purchase Items</p>
-                          <div className="flex flex-wrap gap-1">
-                            {customer.purchaseItems.slice(0, 3).map((item, itemIndex) => (<div key={itemIndex} className="text-xs bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 backdrop-blur-sm px-2 py-1 rounded-lg border border-purple-200/50 dark:border-purple-700/50 text-purple-700 dark:text-purple-300">{item}</div>))}
-                            {customer.purchaseItems.length > 3 && <div className="text-xs bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded-lg text-gray-600 dark:text-gray-400">+{customer.purchaseItems.length - 3} more</div>}
+                      <div className="block md:hidden space-y-3 p-4">
+                        {salesData.topQuantityItems.slice(0, 10).map((item, index) => (
+                          <div key={index} className="bg-white/60 dark:bg-gray-700/60 backdrop-blur-sm rounded-lg p-4 border border-gray-200/50 dark:border-gray-600/50">
+                            <h5 className="font-bold text-gray-900 dark:text-gray-100 mb-3 capitalize">{item.metalType} - {item.category}</h5>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div><p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Purity</p><p className="text-sm font-bold text-blue-600 dark:text-blue-400">{item.purity}%</p></div>
+                              <div><p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Quantity</p><p className="text-sm font-bold text-purple-600 dark:text-purple-400">{item.totalItems}</p></div>
+                              <div><p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Weight</p><p className="text-sm font-semibold text-gray-700 dark:text-gray-300">{item.totalGrossWeight} g</p></div>
+                              <div><p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Revenue</p><p className="text-sm font-semibold text-gray-700 dark:text-gray-300">₹{item.totalSalesAmount.toLocaleString()}</p></div>
+                            </div>
                           </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+  
+                  {/* Weight Leaders */}
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 md:gap-8">
+                    <div className="bg-gradient-to-br from-yellow-50 to-amber-50 dark:from-yellow-900/20 dark:to-amber-900/20 backdrop-blur-sm rounded-xl md:rounded-2xl p-4 sm:p-6 md:p-8 border border-yellow-200/50 dark:border-yellow-700/50 shadow-lg hover:shadow-xl transition-all duration-300">
+                      <h4 className="text-base sm:text-lg md:text-xl font-bold text-yellow-800 dark:text-yellow-200 mb-6 flex items-center gap-2"><div className="w-3 h-3 bg-gradient-to-r from-yellow-400 to-amber-500 rounded-full"></div>Gold Weight Leaders</h4>
+                      {salesData.goldWeightLeaders && salesData.goldWeightLeaders.length > 0 ? (
+                        <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-lg border border-gray-200/50 dark:border-gray-700/50 overflow-hidden">
+                          <div className="hidden sm:block">
+                            <table className="w-full text-sm">
+                              <thead className="bg-gradient-to-r from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-600">
+                                <tr>
+                                  <th className="text-left p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">Category</th>
+                                  <th className="text-center p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">Purity</th>
+                                  <th className="text-right p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">Weight</th>
+                                  <th className="text-right p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">Revenue</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {salesData.goldWeightLeaders.slice(0, 5).map((item, index) => (
+                                  <tr key={index} className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50/80 dark:hover:bg-gray-700/50 transition-colors duration-200">
+                                    <td className="p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">{item.category}</td>
+                                    <td className="p-3 md:p-4 text-center font-bold text-yellow-600 dark:text-yellow-400">{item.purity}%</td>
+                                    <td className="p-3 md:p-4 text-right font-bold text-amber-600 dark:text-amber-400">{item.totalGrossWeight} g</td>
+                                    <td className="p-3 md:p-4 text-right text-gray-700 dark:text-gray-300">₹{item.totalSalesAmount.toLocaleString()}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-center h-[200px] bg-white/60 dark:bg-gray-800/60 backdrop-blur-sm rounded-xl border border-gray-200/50 dark:border-gray-700/50">
+                          <p className="text-sm text-gray-500 dark:text-gray-400 text-center px-4">No gold weight data available</p>
                         </div>
                       )}
                     </div>
-                  ))}
-                </div>
-                {customersData.customers.length > 50 && (
-                  <div className="p-4 text-center text-gray-500 bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-700 border-t border-gray-200/50 dark:border-gray-700/50 dark:text-gray-400">
-                    Showing first 50 customers. Download Excel for complete list.
+                    <div className="bg-gradient-to-br from-gray-50 to-slate-50 dark:from-gray-800 dark:to-slate-800 backdrop-blur-sm rounded-xl md:rounded-2xl p-4 sm:p-6 md:p-8 border border-gray-200/50 dark:border-gray-600/50 shadow-lg hover:shadow-xl transition-all duration-300">
+                      <h4 className="text-base sm:text-lg md:text-xl font-bold text-gray-800 dark:text-gray-200 mb-6 flex items-center gap-2"><div className="w-3 h-3 bg-gradient-to-r from-gray-400 to-slate-500 rounded-full"></div>Silver Weight Leaders</h4>
+                      {salesData.silverWeightLeaders && salesData.silverWeightLeaders.length > 0 ? (
+                        <div className="bg-white/80 dark:bg-gray-700/80 backdrop-blur-sm rounded-xl shadow-lg border border-gray-200/50 dark:border-gray-600/50 overflow-hidden">
+                          <div className="hidden sm:block">
+                            <table className="w-full text-sm">
+                              <thead className="bg-gradient-to-r from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-600">
+                                <tr>
+                                  <th className="text-left p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">Category</th>
+                                  <th className="text-center p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">Purity</th>
+                                  <th className="text-right p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">Weight</th>
+                                  <th className="text-right p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">Revenue</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {salesData.silverWeightLeaders.slice(0, 5).map((item, index) => (
+                                  <tr key={index} className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50/80 dark:hover:bg-gray-700/50 transition-colors duration-200">
+                                    <td className="p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">{item.category}</td>
+                                    <td className="p-3 md:p-4 text-center font-bold text-gray-600 dark:text-gray-400">{item.purity}%</td>
+                                    <td className="p-3 md:p-4 text-right font-bold text-slate-600 dark:text-slate-400">{item.totalGrossWeight} g</td>
+                                    <td className="p-3 md:p-4 text-right text-gray-700 dark:text-gray-300">₹{item.totalSalesAmount.toLocaleString()}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-center h-[200px] bg-white/60 dark:bg-gray-700/60 backdrop-blur-sm rounded-xl border border-gray-200/50 dark:border-gray-600/50">
+                          <p className="text-sm text-gray-500 dark:text-gray-400 text-center px-4">No silver weight data available</p>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                )}
+                </div>
+              )}
+  
+              {/* ── SALES DOWNLOAD BUTTON ── */}
+              <div className="flex flex-col gap-3 pt-6 border-t border-gray-200/50 dark:border-gray-700/50">
+                <button onClick={() => setDownloadModal({ open: true, type: 'sales', data: salesData })} className="w-full bg-gradient-to-r from-green-600 to-emerald-700 hover:from-green-700 hover:to-emerald-800 text-white font-semibold px-6 py-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 flex items-center justify-center gap-2 min-h-[48px]">
+                  <Download className="h-5 w-5" /><span>Download Sales Report</span>
+                </button>
+                <label className="flex items-center justify-center gap-3 cursor-pointer p-3 bg-white/60 dark:bg-gray-800/60 backdrop-blur-sm rounded-xl border border-gray-200/50 dark:border-gray-700/50 hover:bg-white/80 dark:hover:bg-gray-800/80 transition-all duration-200">
+                  <input type="checkbox" checked={includeEntries} onChange={(e) => setIncludeEntries(e.target.checked)} className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2 dark:bg-gray-700 dark:border-gray-600" />
+                  <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">Include Related Entries</span>
+                </label>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-center py-12 bg-white/60 dark:bg-gray-800/60 backdrop-blur-sm rounded-xl border border-gray-200/50 dark:border-gray-700/50">
+              <p className="text-gray-500 dark:text-gray-400 text-lg text-center px-4">No sales data available</p>
+            </div>
+          )}
+        </div>
+  
+        {/* ── CUSTOMER LIST REPORT SECTION ── */}
+        <div className="w-full max-w-7xl mx-auto bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-xl md:rounded-2xl shadow-xl border border-gray-200/50 dark:border-gray-700/50 p-2 sm:p-4 md:p-6 lg:p-8 hover:shadow-2xl transition-all duration-300">
+          <div className="flex items-center gap-2 sm:gap-3 mb-6 md:mb-8">
+            <div className="p-2 sm:p-2.5 md:p-3 bg-gradient-to-r from-purple-600 to-pink-700 rounded-xl shadow-lg">
+              <Users className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
+            </div>
+            <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 dark:text-gray-100">Customer List Report</h2>
+          </div>
+  
+          <div className="bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 backdrop-blur-sm p-4 sm:p-6 md:p-8 rounded-xl md:rounded-2xl mb-6 md:mb-8 border border-purple-200/50 dark:border-purple-700/50 shadow-lg hover:shadow-xl transition-all duration-300">
+            <h3 className="text-lg sm:text-xl md:text-2xl font-bold text-purple-800 dark:text-purple-200 mb-6 flex items-center gap-2"><div className="w-3 h-3 bg-gradient-to-r from-purple-400 to-pink-500 rounded-full"></div>Select Fields to Include</h3>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 md:gap-4">
+              {Object.entries(customerFields).map(([field, checked]) => (
+                <label key={field} className="flex items-center gap-2 cursor-pointer group p-3 bg-white/60 dark:bg-gray-800/60 backdrop-blur-sm rounded-xl border border-gray-200/50 dark:border-gray-700/50 hover:bg-white/80 dark:hover:bg-gray-800/80 transition-all duration-200">
+                  <input type="checkbox" checked={checked} onChange={(e) => setCustomerFields(prev => ({ ...prev, [field]: e.target.checked }))} className="w-4 h-4 text-purple-600 bg-gray-100 border-gray-300 rounded focus:ring-purple-500 focus:ring-2 dark:bg-gray-700 dark:border-gray-600" />
+                  <span className="text-sm font-semibold capitalize text-gray-700 group-hover:text-gray-900 transition-colors duration-200 dark:text-gray-300 dark:group-hover:text-gray-100">
+                    {field === 'purchaseAmount' ? 'Purchase Amount' : field === 'purchaseItems' ? 'Purchase Items' : field}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+  
+          {loading.customers ? (
+            <div className="flex items-center justify-center py-12"><LoadingSpinner /></div>
+          ) : customersData ? (
+            <div className="space-y-6 md:space-y-8">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 md:gap-6">
+                <div className="bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 backdrop-blur-sm p-4 sm:p-6 rounded-xl md:rounded-2xl shadow-lg hover:shadow-xl transition-all duration-200 border border-purple-200/50 dark:border-purple-700/50">
+                  <p className="text-sm md:text-base text-purple-700 dark:text-purple-300 font-semibold mb-2">Total Customers</p>
+                  <p className="text-xl sm:text-2xl md:text-3xl font-bold bg-gradient-to-r from-purple-600 to-pink-700 bg-clip-text text-transparent">{customersData.totalCustomers}</p>
+                </div>
+                <div className="bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 backdrop-blur-sm p-4 sm:p-6 rounded-xl md:rounded-2xl shadow-lg hover:shadow-xl transition-all duration-200 border border-purple-200/50 dark:border-purple-700/50">
+                  <p className="text-sm md:text-base text-purple-700 dark:text-purple-300 font-semibold mb-2">Total Revenue</p>
+                  <p className="text-xl sm:text-2xl md:text-3xl font-bold bg-gradient-to-r from-purple-600 to-pink-700 bg-clip-text text-transparent">₹{formatIndianNumber(customersData.summary.totalRevenue)}</p>
+                </div>
+                <div className="bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 backdrop-blur-sm p-4 sm:p-6 rounded-xl md:rounded-2xl shadow-lg hover:shadow-xl transition-all duration-200 border border-purple-200/50 dark:border-purple-700/50">
+                  <p className="text-sm md:text-base text-purple-700 dark:text-purple-300 font-semibold mb-2">Avg Customer Value</p>
+                  <p className="text-xl sm:text-2xl md:text-3xl font-bold bg-gradient-to-r from-purple-600 to-pink-700 bg-clip-text text-transparent">₹{formatIndianNumber(customersData.summary.averageCustomerValue)}</p>
+                </div>
+              </div>
+  
+              {customersData.customers.length > 0 && (
+                <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm rounded-xl md:rounded-2xl overflow-hidden shadow-lg border border-gray-200/50 dark:border-gray-700/50">
+                  <h4 className="text-base sm:text-lg md:text-xl font-bold p-4 sm:p-6 bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-700 text-gray-900 dark:text-gray-100 border-b border-gray-200 dark:border-gray-600 flex items-center gap-2"><div className="w-3 h-3 bg-gradient-to-r from-purple-400 to-pink-500 rounded-full"></div>Customer List</h4>
+                  <div className="hidden md:block">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm md:text-base min-w-[700px]">
+                        <thead className="bg-gradient-to-r from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-600">
+                          <tr>
+                            {customerFields.name && <th className="text-left p-4 font-semibold text-gray-900 dark:text-gray-100">Name</th>}
+                            {customerFields.mobile && <th className="text-left p-4 font-semibold text-gray-900 dark:text-gray-100">Mobile</th>}
+                            {customerFields.address && <th className="text-left p-4 font-semibold text-gray-900 dark:text-gray-100">Address</th>}
+                            {customerFields.purchaseAmount && (<><th className="text-right p-4 font-semibold text-gray-900 dark:text-gray-100">Total Purchase</th><th className="text-right p-4 font-semibold text-gray-900 dark:text-gray-100">Transactions</th><th className="text-right p-4 font-semibold text-gray-900 dark:text-gray-100">Avg Purchase</th></>)}
+                            {customerFields.purchaseItems && <th className="text-left p-4 font-semibold text-gray-900 dark:text-gray-100">Purchase Items</th>}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {customersData.customers.slice(0, 50).map((customer, index) => (
+                            <tr key={index} className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50/80 dark:hover:bg-gray-700/50 transition-colors duration-200">
+                              {customerFields.name && <td className="p-4 font-semibold text-gray-900 dark:text-gray-100">{customer.customerName || 'N/A'}</td>}
+                              {customerFields.mobile && <td className="p-4 text-gray-900 dark:text-gray-100">{customer.customerMobile || 'N/A'}</td>}
+                              {customerFields.address && <td className="p-4 text-gray-900 dark:text-gray-100">{customer.customerAddress || 'N/A'}</td>}
+                              {customerFields.purchaseAmount && (<><td className="p-4 text-right font-bold text-purple-600 dark:text-purple-400">₹{formatIndianNumber(customer.totalPurchaseAmount || 0)}</td><td className="p-4 text-right text-gray-700 dark:text-gray-300">{customer.transactionCount || 0}</td><td className="p-4 text-right font-semibold text-gray-700 dark:text-gray-300">₹{formatIndianNumber(customer.averagePurchaseValue || 0)}</td></>)}
+                              {customerFields.purchaseItems && (
+                                <td className="p-4">
+                                  <div className="max-w-xs">
+                                    {customer.purchaseItems && customer.purchaseItems.length > 0 ? (
+                                      <div className="space-y-1">{customer.purchaseItems.map((item, itemIndex) => (<div key={itemIndex} className="text-xs bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 backdrop-blur-sm p-2 rounded-lg border border-purple-200/50 dark:border-purple-700/50 text-purple-700 dark:text-purple-300">{item}</div>))}</div>
+                                    ) : (<span className="text-gray-500 dark:text-gray-400">No items</span>)}
+                                  </div>
+                                </td>
+                              )}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                  <div className="block md:hidden space-y-3 p-4">
+                    {customersData.customers.slice(0, 50).map((customer, index) => (
+                      <div key={index} className="bg-white/60 dark:bg-gray-700/60 backdrop-blur-sm rounded-lg p-4 border border-gray-200/50 dark:border-gray-600/50">
+                        <h5 className="font-bold text-gray-900 dark:text-gray-100 mb-3">{customer.customerName || 'Unknown Customer'}</h5>
+                        <div className="grid grid-cols-2 gap-3">
+                          {customerFields.mobile && <div><p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Mobile</p><p className="text-sm font-semibold text-gray-700 dark:text-gray-300">{customer.customerMobile || 'N/A'}</p></div>}
+                          {customerFields.purchaseAmount && <div><p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Total Purchase</p><p className="text-sm font-bold text-purple-600 dark:text-purple-400">₹{customer.totalPurchaseAmount?.toLocaleString() || 0}</p></div>}
+                          {customerFields.purchaseAmount && <div><p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Transactions</p><p className="text-sm font-semibold text-gray-700 dark:text-gray-300">{customer.transactionCount || 0}</p></div>}
+                          {customerFields.purchaseAmount && <div><p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Avg Purchase</p><p className="text-sm font-semibold text-gray-700 dark:text-gray-300">₹{customer.averagePurchaseValue?.toLocaleString() || 0}</p></div>}
+                        </div>
+                        {customerFields.address && <div className="mt-3 pt-3 border-t border-gray-200/50 dark:border-gray-600/50"><p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Address</p><p className="text-sm text-gray-700 dark:text-gray-300">{customer.customerAddress || 'N/A'}</p></div>}
+                        {customerFields.purchaseItems && customer.purchaseItems && customer.purchaseItems.length > 0 && (
+                          <div className="mt-3 pt-3 border-t border-gray-200/50 dark:border-gray-600/50">
+                            <p className="text-xs text-gray-600 dark:text-gray-400 font-medium mb-2">Purchase Items</p>
+                            <div className="flex flex-wrap gap-1">
+                              {customer.purchaseItems.slice(0, 3).map((item, itemIndex) => (<div key={itemIndex} className="text-xs bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 backdrop-blur-sm px-2 py-1 rounded-lg border border-purple-200/50 dark:border-purple-700/50 text-purple-700 dark:text-purple-300">{item}</div>))}
+                              {customer.purchaseItems.length > 3 && <div className="text-xs bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded-lg text-gray-600 dark:text-gray-400">+{customer.purchaseItems.length - 3} more</div>}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  {customersData.customers.length > 50 && (
+                    <div className="p-4 text-center text-gray-500 bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-700 border-t border-gray-200/50 dark:border-gray-700/50 dark:text-gray-400">
+                      Showing first 50 customers. Download Excel for complete list.
+                    </div>
+                  )}
+                </div>
+              )}
+  
+              <div className="flex flex-col gap-3 pt-6 border-t border-gray-200/50 dark:border-gray-700/50">
+                <button onClick={() => setDownloadModal({ open: true, type: 'customers', data: customersData })} className="w-full bg-gradient-to-r from-purple-600 to-pink-700 hover:from-purple-700 hover:to-pink-800 text-white font-semibold px-6 py-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 flex items-center justify-center gap-2 min-h-[48px]">
+                  <Download className="h-5 w-5" /><span>Download Customer List</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-center py-12 bg-white/60 dark:bg-gray-800/60 backdrop-blur-sm rounded-xl border border-gray-200/50 dark:border-gray-700/50">
+              <p className="text-gray-500 dark:text-gray-400 text-lg text-center px-4">No customer data available</p>
+            </div>
+          )}
+        </div>
+  
+        {/* ── DOWNLOAD MODAL ── */}
+        <Modal isOpen={downloadModal.open} onClose={() => setDownloadModal({ open: false, type: '', data: null })} title="Download Report">
+          <div className="space-y-6">
+            <p className="text-gray-700 dark:text-gray-300 font-medium">Choose download format:</p>
+            {downloadModal.type.startsWith('stock') && (
+              <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl border border-blue-200/50 dark:border-blue-700/50">
+                <p className="text-sm text-blue-800 dark:text-blue-200 leading-relaxed">
+                  {downloadModal.type === 'stock-gold' && "Gold inventory report will include gold categories with gross weight, pure weight, and average purity."}
+                  {downloadModal.type === 'stock-silver' && "Silver inventory report will include silver categories with gross weight, pure weight, and average purity."}
+                  {downloadModal.type === 'stock-full' && "Complete inventory report will include both gold and silver with all category breakdowns."}
+                </p>
               </div>
             )}
-            <div className="flex flex-col gap-3 pt-6 border-t border-gray-200/50 dark:border-gray-700/50">
-              <button onClick={() => setDownloadModal({ open: true, type: 'customers', data: customersData })} className="w-full bg-gradient-to-r from-purple-600 to-pink-700 hover:from-purple-700 hover:to-pink-800 text-white font-semibold px-6 py-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 flex items-center justify-center gap-2 min-h-[48px]">
-                <Download className="h-5 w-5" /><span>Download Customer List</span>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <button onClick={() => handleDownload(downloadModal.type, 'pdf')} className="flex-1 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-medium px-6 py-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 flex items-center justify-center gap-2">
+                <FileText className="h-4 w-4" />Download PDF
+              </button>
+              <button onClick={() => handleDownload(downloadModal.type, 'excel')} className="flex-1 bg-white border-2 border-gray-300 text-gray-700 hover:bg-gray-50 hover:border-gray-400 font-medium px-6 py-3 rounded-xl shadow-sm hover:shadow-md transition-all duration-200 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700 flex items-center justify-center gap-2">
+                <FileText className="h-4 w-4" />Download Excel
               </button>
             </div>
           </div>
-        ) : (
-          <div className="flex items-center justify-center py-12 bg-white/60 dark:bg-gray-800/60 backdrop-blur-sm rounded-xl border border-gray-200/50 dark:border-gray-700/50">
-            <p className="text-gray-500 dark:text-gray-400 text-lg text-center px-4">No customer data available</p>
-          </div>
-        )}
+        </Modal>
+  
       </div>
-
-      {/* Download Modal */}
-      <Modal isOpen={downloadModal.open} onClose={() => setDownloadModal({ open: false, type: '', data: null })} title="Download Report">
-        <div className="space-y-6">
-          <p className="text-gray-700 dark:text-gray-300 font-medium">Choose download format:</p>
-          {downloadModal.type.startsWith('stock') && (
-            <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl border border-blue-200/50 dark:border-blue-700/50">
-              <p className="text-sm text-blue-800 dark:text-blue-200 leading-relaxed">
-                {downloadModal.type === 'stock-gold' && "Gold inventory report will include gold categories with gross weight, pure weight, and average purity."}
-                {downloadModal.type === 'stock-silver' && "Silver inventory report will include silver categories with gross weight, pure weight, and average purity."}
-                {downloadModal.type === 'stock-full' && "Complete inventory report will include both gold and silver with all category breakdowns."}
-              </p>
-            </div>
-          )}
-          <div className="flex flex-col sm:flex-row gap-3">
-            <button onClick={() => handleDownload(downloadModal.type, 'pdf')} className="flex-1 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-medium px-6 py-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 flex items-center justify-center gap-2">
-              <FileText className="h-4 w-4" />Download PDF
-            </button>
-            <button onClick={() => handleDownload(downloadModal.type, 'excel')} className="flex-1 bg-white border-2 border-gray-300 text-gray-700 hover:bg-gray-50 hover:border-gray-400 font-medium px-6 py-3 rounded-xl shadow-sm hover:shadow-md transition-all duration-200 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700 flex items-center justify-center gap-2">
-              <FileText className="h-4 w-4" />Download Excel
-            </button>
-          </div>
-        </div>
-      </Modal>
     </div>
-  </div>
-);  
+  );
 
 };
 

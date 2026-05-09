@@ -23,7 +23,6 @@ import {
   Package,
   Weight
 } from "lucide-react";
-
 // Custom Select Component
 const CustomSelect = ({ value, onValueChange, children, disabled = false, className = "" }) => (
   <select
@@ -39,7 +38,6 @@ const CustomSelect = ({ value, onValueChange, children, disabled = false, classN
     {children}
   </select>
 );
-
 // Custom Modal Component
 const CustomModal = ({ isOpen, onClose, title, children, size = "md" }) => {
   if (!isOpen) return null;
@@ -76,7 +74,6 @@ const CustomModal = ({ isOpen, onClose, title, children, size = "md" }) => {
     </div>
   );
 };
-
 // Custom Toggle Component  
 const CustomToggle = ({ checked, onChange, label, id }) => (
   <div className="flex items-center gap-3">
@@ -111,43 +108,46 @@ const CustomToggle = ({ checked, onChange, label, id }) => (
     </label>
   </div>
 );
-
 const validateMobileNumber = (number) => {
   const cleanNumber = number.replace(/\D/g, '');
   return cleanNumber.slice(0, 10);
 };
-
 const sortSales = (sales) => {
   return [...sales].sort((a, b) => new Date(b.soldAt) - new Date(a.soldAt));
 };
-
 export default function SalesPage() {
   const { t } = useTranslation();
   
   const [sales, setSales] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // ── NEW: loading states for category & purity dropdowns ────────────────────
+  const [isCategoryLoading, setIsCategoryLoading] = useState(false);
+  const [isEditCategoryLoading, setIsEditCategoryLoading] = useState(false);
+  const [isFilterCategoryLoading, setIsFilterCategoryLoading] = useState(false);
+  const [isPurityLoading, setIsPurityLoading] = useState(false);
+  const [isEditPurityLoading, setIsEditPurityLoading] = useState(false);
+  const [isFilterPurityLoading, setIsFilterPurityLoading] = useState(false);
   
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [isDeleteRangeModalOpen, setIsDeleteRangeModalOpen] = useState(false);
-
   // Entry search for Add Sale
   const [isEntrySearchOpen, setIsEntrySearchOpen] = useState(false);
   const [entrySearchResults, setEntrySearchResults] = useState([]);
   const [entrySearchLoading, setEntrySearchLoading] = useState(false);
-
   // Entry search for Edit Sale
   const [isEditEntrySearchOpen, setIsEditEntrySearchOpen] = useState(false);
   const [editEntrySearchResults, setEditEntrySearchResults] = useState([]);
   const [editEntrySearchLoading, setEditEntrySearchLoading] = useState(false);
-
   const [deleteRangeForm, setDeleteRangeForm] = useState({ startDate: "", endDate: "" });
   
+  // ── CHANGED: metalType now starts as "" (no default) ───────────────────────
   const [saleForm, setSaleForm] = useState({
-    metalType: "gold",
+    metalType: "",
     category: "",
     purity: "",
     weight: "",
@@ -162,7 +162,6 @@ export default function SalesPage() {
     manualSoldDate: false,
     soldDate: ""
   });
-
   const [editForm, setEditForm] = useState({
     metalType: "gold",
     category: "",
@@ -175,9 +174,8 @@ export default function SalesPage() {
     customerAddress: "",
     customerMobile: "",
     description: "",
-    soldDate: ""  // editable date
+    soldDate: ""
   });
-
   const [editCategories, setEditCategories] = useState([]);
   const [editPurities, setEditPurities] = useState([]);
   const [editingSale, setEditingSale] = useState(null);
@@ -191,9 +189,7 @@ export default function SalesPage() {
   
   const [availableCategories, setAvailableCategories] = useState([]);
   const [availablePurities, setAvailablePurities] = useState([]);
-
   // ─── Data fetching ──────────────────────────────────────────────────────────
-
   const fetchSales = async () => {
     try {
       const token = localStorage.getItem("token");
@@ -212,7 +208,6 @@ export default function SalesPage() {
       setLoading(false);
     }
   };
-
   const fetchCategories = async (metalType) => {
     try {
       const token = localStorage.getItem("token");
@@ -233,7 +228,6 @@ export default function SalesPage() {
       return [];
     }
   };
-
   const fetchPurities = async (metalType, category) => {
     try {
       const token = localStorage.getItem("token");
@@ -253,9 +247,7 @@ export default function SalesPage() {
       return [];
     }
   };
-
   // ─── Add Sale form handlers ─────────────────────────────────────────────────
-
   const handleSaleFormChange = async (field, value) => {
     setSaleForm(prev => {
       const updated = { ...prev, [field]: value };
@@ -264,23 +256,28 @@ export default function SalesPage() {
       return updated;
     });
     if (field === 'metalType') {
+      // ── CHANGED: show loader while fetching categories ──────────────────────
+      setIsCategoryLoading(true);
+      setAvailableCategories([]);
+      setAvailablePurities([]);
       const cats = await fetchCategories(value);
       setAvailableCategories(cats);
-      setAvailablePurities([]);
+      setIsCategoryLoading(false);
     }
     if (field === 'category') {
       const currentMetal = saleForm.metalType;
       if (currentMetal && value) {
+        setIsPurityLoading(true);
+        setAvailablePurities([]);
         const purs = await fetchPurities(currentMetal, value);
         setAvailablePurities(purs);
+        setIsPurityLoading(false);
       } else {
         setAvailablePurities([]);
       }
     }
   };
-
   // ─── Edit Sale form handlers ────────────────────────────────────────────────
-
   const handleEditFormChange = async (field, value) => {
     setEditForm(prev => {
       const updated = { ...prev, [field]: value };
@@ -289,23 +286,28 @@ export default function SalesPage() {
       return updated;
     });
     if (field === 'metalType') {
+      // ── CHANGED: show loader while fetching categories ──────────────────────
+      setIsEditCategoryLoading(true);
+      setEditCategories([]);
+      setEditPurities([]);
       const cats = await fetchCategories(value);
       setEditCategories(cats);
-      setEditPurities([]);
+      setIsEditCategoryLoading(false);
     }
     if (field === 'category') {
       const currentMetal = field === 'metalType' ? value : editForm.metalType;
       if (currentMetal && value) {
+        setIsEditPurityLoading(true);
+        setEditPurities([]);
         const purs = await fetchPurities(currentMetal, value);
         setEditPurities(purs);
+        setIsEditPurityLoading(false);
       } else {
         setEditPurities([]);
       }
     }
   };
-
   // ─── Filter handlers ────────────────────────────────────────────────────────
-
   const handleFilterChange = async (field, value) => {
     setFilters(prev => {
       const updated = { ...prev, [field]: value };
@@ -315,8 +317,13 @@ export default function SalesPage() {
     });
     if (field === 'metalType') {
       if (value) {
+        // ── CHANGED: show loader while fetching categories ────────────────────
+        setIsFilterCategoryLoading(true);
+        setAvailableCategories([]);
+        setAvailablePurities([]);
         const cats = await fetchCategories(value);
         setAvailableCategories(cats);
+        setIsFilterCategoryLoading(false);
       } else {
         setAvailableCategories([]);
         setAvailablePurities([]);
@@ -325,21 +332,21 @@ export default function SalesPage() {
     if (field === 'category') {
       const currentMetal = filters.metalType;
       if (currentMetal && value) {
+        setIsFilterPurityLoading(true);
+        setAvailablePurities([]);
         const purs = await fetchPurities(currentMetal, value);
         setAvailablePurities(purs);
+        setIsFilterPurityLoading(false);
       } else {
         setAvailablePurities([]);
       }
     }
   };
-
   // ─── Entry search for Add Sale ──────────────────────────────────────────────
-
   const entryMatchesForm = (entry, form) => {
     const metal = form.metalType;
     const enteredWeight = parseFloat(form.weight);
     const enteredDesc = (form.description || "").trim().toLowerCase();
-
     if (!isNaN(enteredWeight) && enteredWeight > 0) {
       const tolerance = metal === "silver" ? 1.0 : 0.03;
       if (Math.abs(entry.weight - enteredWeight) > tolerance) return false;
@@ -351,7 +358,6 @@ export default function SalesPage() {
     }
     return true;
   };
-
   const handleEntrySearch = async () => {
     setEntrySearchLoading(true);
     setIsEntrySearchOpen(true);
@@ -361,7 +367,6 @@ export default function SalesPage() {
       if (saleForm.metalType) params.append("metalType", saleForm.metalType);
       if (saleForm.category)  params.append("category",  saleForm.category);
       if (saleForm.purity)    params.append("purity",    saleForm.purity);
-
       const response = await api.get(`/api/entries?${params}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -374,7 +379,6 @@ export default function SalesPage() {
       setEntrySearchLoading(false);
     }
   };
-
   const handleSelectEntry = async (entry) => {
     setSaleForm(prev => ({
       ...prev,
@@ -395,9 +399,7 @@ export default function SalesPage() {
     }
     setIsEntrySearchOpen(false);
   };
-
   // ─── Entry search for Edit Sale ─────────────────────────────────────────────
-
   const handleEditEntrySearch = async () => {
     setEditEntrySearchLoading(true);
     setIsEditEntrySearchOpen(true);
@@ -407,7 +409,6 @@ export default function SalesPage() {
       if (editForm.metalType) params.append("metalType", editForm.metalType);
       if (editForm.category)  params.append("category",  editForm.category);
       if (editForm.purity)    params.append("purity",    editForm.purity);
-
       const response = await api.get(`/api/entries?${params}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -420,7 +421,6 @@ export default function SalesPage() {
       setEditEntrySearchLoading(false);
     }
   };
-
   const handleSelectEditEntry = async (entry) => {
     setEditForm(prev => ({
       ...prev,
@@ -441,9 +441,7 @@ export default function SalesPage() {
     }
     setIsEditEntrySearchOpen(false);
   };
-
   // ─── Create Sale ────────────────────────────────────────────────────────────
-
   const validateSaleForm = () => {
     const { metalType, category, purity, weight, salesPrice, isBulk, itemCount } = saleForm;
     if (!metalType || !category || !purity || !weight || !salesPrice) {
@@ -458,7 +456,6 @@ export default function SalesPage() {
     }
     return true;
   };
-
   const handleCreateSale = async () => {
     if (!validateSaleForm()) return;
     try {
@@ -487,7 +484,6 @@ export default function SalesPage() {
       setIsSubmitting(false);
     }
   };
-
   const confirmSale = async () => {
     try {
       setIsSubmitting(true);
@@ -495,12 +491,15 @@ export default function SalesPage() {
       await api.post(`/api/sales`, confirmationData, {
         headers: { Authorization: `Bearer ${token}` }
       });
+      // ── CHANGED: reset metalType to "" on clear ─────────────────────────────
       setSaleForm({
-        metalType: "gold", category: "", purity: "", weight: "", salesPrice: "",
+        metalType: "", category: "", purity: "", weight: "", salesPrice: "",
         isBulk: false, itemCount: "", customerName: "", customerAddress: "",
         customerMobile: "", description: "", showCustomerInfo: false,
         manualSoldDate: false, soldDate: ""
       });
+      setAvailableCategories([]);
+      setAvailablePurities([]);
       setIsAddModalOpen(false);
       setIsConfirmModalOpen(false);
       setConfirmationData(null);
@@ -513,17 +512,12 @@ export default function SalesPage() {
       setIsSubmitting(false);
     }
   };
-
   // ─── Open Edit Modal ────────────────────────────────────────────────────────
-
   const handleEditSale = async (sale) => {
     setEditingSale(sale);
-
-    // Format soldAt as YYYY-MM-DD for the date input
     const soldDateStr = sale.soldAt
       ? new Date(sale.soldAt).toISOString().split('T')[0]
       : "";
-
     setEditForm({
       metalType: sale.metalType || "gold",
       category: sale.category || "",
@@ -538,18 +532,17 @@ export default function SalesPage() {
       description: sale.description || "",
       soldDate: soldDateStr
     });
-
+    setIsEditCategoryLoading(true);
     const cats = await fetchCategories(sale.metalType || "gold");
     setEditCategories(cats);
+    setIsEditCategoryLoading(false);
     if (sale.metalType && sale.category) {
       const purs = await fetchPurities(sale.metalType, sale.category);
       setEditPurities(purs);
     }
     setIsEditModalOpen(true);
   };
-
   // ─── Update Sale ────────────────────────────────────────────────────────────
-
   const handleUpdateSale = async () => {
     const { metalType, category, purity, weight, salesPrice, isBulk, itemCount } = editForm;
     if (!metalType || !category || !purity || !weight || !salesPrice) {
@@ -562,7 +555,6 @@ export default function SalesPage() {
       alert("Item count is required for bulk sales");
       return;
     }
-
     try {
       setIsSubmitting(true);
       const token = localStorage.getItem("token");
@@ -595,9 +587,7 @@ export default function SalesPage() {
       setIsSubmitting(false);
     }
   };
-
   // ─── Delete Sale ────────────────────────────────────────────────────────────
-
   const handleDeleteSale = async (saleId) => {
     if (!confirm("Are you sure you want to delete this sale? This action cannot be undone.")) return;
     try {
@@ -610,9 +600,7 @@ export default function SalesPage() {
       alert(err.response?.data?.message || "Error deleting sale. Please try again.");
     }
   };
-
   // ─── Return Sale ────────────────────────────────────────────────────────────
-
   const handleReturnSale = async (saleId) => {
     if (!confirm("Are you sure you want to return this sale to inventory?")) return;
     try {
@@ -627,14 +615,11 @@ export default function SalesPage() {
       alert(err.response?.data?.message || "Error returning sale. Please try again.");
     }
   };
-
   // ─── Filters ────────────────────────────────────────────────────────────────
-
   const handleApplyFilters = () => {
     setActiveFilters(filters);
     setIsFilterOpen(false);
   };
-
   const handleClearFilters = () => {
     setFilters({
       startDate: "", endDate: "", metalType: "", category: "",
@@ -644,9 +629,7 @@ export default function SalesPage() {
     setAvailableCategories([]);
     setAvailablePurities([]);
   };
-
   // ─── Delete Range ───────────────────────────────────────────────────────────
-
   const handleDeleteSalesRange = async () => {
     if (!deleteRangeForm.startDate || !deleteRangeForm.endDate) {
       alert("Please select both start and end dates");
@@ -671,7 +654,6 @@ export default function SalesPage() {
       }
       const fmt = (d) => { const [y,m,day] = d.split('-'); return `${day}/${m}/${y}`; };
       if (!confirm(`Are you sure you want to delete ${salesCount} sales from ${fmt(startDate)} to ${fmt(endDate)}? This action cannot be undone.`)) return;
-
       await api.delete(`/api/sales/range`, {
         headers: { Authorization: `Bearer ${token}` },
         data: { startDate, endDate }
@@ -687,26 +669,20 @@ export default function SalesPage() {
       setIsSubmitting(false);
     }
   };
-
   // ─── Formatters ─────────────────────────────────────────────────────────────
-
   const formatCurrency = (amount) => new Intl.NumberFormat('en-IN', {
     style: 'currency', currency: 'INR',
     minimumFractionDigits: 0, maximumFractionDigits: 0
   }).format(amount);
-
   const formatDate = (dateString) => new Date(dateString).toLocaleDateString('en-IN', {
     year: 'numeric', month: 'short', day: 'numeric',
     hour: '2-digit', minute: '2-digit'
   });
-
   // ─── Init ───────────────────────────────────────────────────────────────────
-
   useEffect(() => {
     fetchSales();
-    fetchCategories("gold").then(cats => setAvailableCategories(cats));
+    // ── CHANGED: no longer pre-fetching gold categories on mount ────────────
   }, [activeFilters]);
-
   if (loading) {
     return (
       <div className="flex justify-center items-center min-h-[400px]">
@@ -714,8 +690,28 @@ export default function SalesPage() {
       </div>
     );
   }
-
   const inputCls = "w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all duration-200 bg-white/50 backdrop-blur-sm placeholder-gray-500 text-gray-900 dark:bg-gray-800/50 dark:border-gray-600 dark:text-gray-100 dark:placeholder-gray-400";
+
+  // ── Inline category loading indicator ────────────────────────────────────────
+  const CategoryLoadingPlaceholder = () => (
+    <div className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl bg-white/50 dark:bg-gray-800/50 dark:border-gray-600 flex items-center gap-2 text-gray-400 dark:text-gray-500">
+      <svg className="animate-spin h-4 w-4 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+      </svg>
+      <span className="text-sm">Loading categories...</span>
+    </div>
+  );
+
+  const PurityLoadingPlaceholder = () => (
+    <div className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl bg-white/50 dark:bg-gray-800/50 dark:border-gray-600 flex items-center gap-2 text-gray-400 dark:text-gray-500">
+      <svg className="animate-spin h-4 w-4 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+      </svg>
+      <span className="text-sm">Loading purities...</span>
+    </div>
+  );
 
   // ─── Entry Search Result Card (shared between Add and Edit) ─────────────────
   const EntrySearchList = ({ results, loading, onSelect, form }) => {
@@ -730,7 +726,6 @@ export default function SalesPage() {
         </p>
       </div>
     );
-
     return (
       <>
         <p className="text-xs text-gray-400 dark:text-gray-500">
@@ -782,10 +777,8 @@ export default function SalesPage() {
       </>
     );
   };
-
   return (
     <div className="p-4 md:p-6 lg:p-8 space-y-6 bg-gray-50 min-h-screen dark:bg-gray-900">
-
       {/* ── Header ── */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 w-full bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-gray-200/50 p-6 dark:bg-gray-800/80 dark:border-gray-700/50">
         <div className="flex gap-2">
@@ -816,7 +809,6 @@ export default function SalesPage() {
           </Button>
         </div>
       </div>
-
       {/* ── Active Filters ── */}
       {Object.keys(activeFilters).length > 0 && (
         <div className="flex flex-wrap gap-2 items-center bg-white/80 backdrop-blur-sm rounded-xl shadow-sm border border-gray-200/50 p-4 dark:bg-gray-800/80 dark:border-gray-700/50">
@@ -831,7 +823,6 @@ export default function SalesPage() {
           </Button>
         </div>
       )}
-
       {/* ── Sales List ── */}
       <div className="space-y-4">
         {sales.length === 0 ? (
@@ -907,30 +898,45 @@ export default function SalesPage() {
           ))
         )}
       </div>
-
       {/* ════════════════════════════════════════════════════════════════════════
           ADD SALE MODAL
       ════════════════════════════════════════════════════════════════════════ */}
       <CustomModal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} title="Create New Sale" size="lg">
         <div className="space-y-4">
+          {/* Metal Type */}
           <div>
             <label className="block text-sm font-medium mb-1 dark:text-gray-200">Metal Type *</label>
             <CustomSelect value={saleForm.metalType} onValueChange={(v) => handleSaleFormChange('metalType', v)}>
+              {/* ── CHANGED: blank placeholder option ── */}
+              <option value="">Select Metal Type</option>
               <option value="gold">Gold</option>
               <option value="silver">Silver</option>
             </CustomSelect>
           </div>
+          {/* Category — shows loader while fetching */}
           <div>
             <label className="block text-sm font-medium mb-1">Category *</label>
-            <CustomSelect value={saleForm.category} onValueChange={(v) => handleSaleFormChange('category', v)}>
-              <option value="">Select Category</option>
-              {availableCategories.map(c => <option key={c} value={c}>{c}</option>)}
-            </CustomSelect>
+            {isCategoryLoading ? (
+              <CategoryLoadingPlaceholder />
+            ) : (
+              <CustomSelect
+                value={saleForm.category}
+                onValueChange={(v) => handleSaleFormChange('category', v)}
+                disabled={!saleForm.metalType}
+              >
+                <option value="">{saleForm.metalType ? "Select Category" : "Select metal first"}</option>
+                {availableCategories.map(c => <option key={c} value={c}>{c}</option>)}
+              </CustomSelect>
+            )}
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">Purity *</label>
-            <CustomSelect value={saleForm.purity} onValueChange={(v) => handleSaleFormChange('purity', v)}>
-              <option value="">Select Purity</option>
+            <CustomSelect
+              value={saleForm.purity}
+              onValueChange={(v) => handleSaleFormChange('purity', v)}
+              disabled={!saleForm.category}
+            >
+              <option value="">{saleForm.category ? "Select Purity" : "Select category first"}</option>
               {availablePurities.map(p => <option key={p} value={p}>{p}%</option>)}
             </CustomSelect>
           </div>
@@ -1030,7 +1036,6 @@ export default function SalesPage() {
           </div>
         </div>
       </CustomModal>
-
       {/* ════════════════════════════════════════════════════════════════════════
           ENTRY SEARCH MODAL (Add Sale)
       ════════════════════════════════════════════════════════════════════════ */}
@@ -1052,7 +1057,6 @@ export default function SalesPage() {
           </div>
         </div>
       </CustomModal>
-
       {/* ════════════════════════════════════════════════════════════════════════
           CONFIRMATION MODAL
       ════════════════════════════════════════════════════════════════════════ */}
@@ -1085,40 +1089,48 @@ export default function SalesPage() {
           </div>
         )}
       </CustomModal>
-
       {/* ════════════════════════════════════════════════════════════════════════
           EDIT SALE MODAL
       ════════════════════════════════════════════════════════════════════════ */}
       <CustomModal isOpen={isEditModalOpen} onClose={() => setIsEditModalOpen(false)} title="Edit Sale" size="lg">
         <div className="space-y-4">
-
           {/* Metal Type */}
           <div>
             <label className="block text-sm font-medium mb-1 dark:text-gray-200">Metal Type *</label>
             <CustomSelect value={editForm.metalType} onValueChange={(v) => handleEditFormChange('metalType', v)}>
+              <option value="">Select Metal Type</option>
               <option value="gold">Gold</option>
               <option value="silver">Silver</option>
             </CustomSelect>
           </div>
-
-          {/* Category */}
+          {/* Category — shows loader while fetching */}
           <div>
             <label className="block text-sm font-medium mb-1 dark:text-gray-200">Category *</label>
-            <CustomSelect value={editForm.category} onValueChange={(v) => handleEditFormChange('category', v)}>
-              <option value="">Select Category</option>
-              {editCategories.map(c => <option key={c} value={c}>{c}</option>)}
-            </CustomSelect>
+            {isEditCategoryLoading ? (
+              <CategoryLoadingPlaceholder />
+            ) : (
+              <CustomSelect
+                value={editForm.category}
+                onValueChange={(v) => handleEditFormChange('category', v)}
+                disabled={!editForm.metalType}
+              >
+                <option value="">{editForm.metalType ? "Select Category" : "Select metal first"}</option>
+                {editCategories.map(c => <option key={c} value={c}>{c}</option>)}
+              </CustomSelect>
+            )}
           </div>
-
           {/* Purity */}
           <div>
             <label className="block text-sm font-medium mb-1 dark:text-gray-200">Purity *</label>
-            <CustomSelect value={editForm.purity} onValueChange={(v) => handleEditFormChange('purity', v)}>
-              <option value="">Select Purity</option>
+            <CustomSelect
+              value={editForm.purity}
+              onValueChange={(v) => handleEditFormChange('purity', v)}
+              disabled={!editForm.category}
+            >
+              <option value="">{editForm.category ? "Select Purity" : "Select category first"}</option>
               {editPurities.map(p => <option key={p} value={p}>{p}%</option>)}
             </CustomSelect>
           </div>
-
           {/* Weight */}
           <div>
             <label className="block text-sm font-medium mb-1 dark:text-gray-200">Weight (grams) *</label>
@@ -1126,7 +1138,6 @@ export default function SalesPage() {
               onChange={(e) => setEditForm(prev => ({ ...prev, weight: e.target.value }))}
               placeholder="Enter weight" className={inputCls} />
           </div>
-
           {/* Sales Price */}
           <div>
             <label className="block text-sm font-medium mb-1 dark:text-gray-200">Sales Price (₹) *</label>
@@ -1134,8 +1145,7 @@ export default function SalesPage() {
               onChange={(e) => setEditForm(prev => ({ ...prev, salesPrice: e.target.value }))}
               placeholder="Enter sales price" className={inputCls} />
           </div>
-
-          {/* ── Search & Select from Inventory (Edit) ── */}
+          {/* Search from inventory */}
           <div className="border-t pt-4">
             <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
               Search inventory to pick a different item — this will update metal, category, purity and weight.
@@ -1146,7 +1156,6 @@ export default function SalesPage() {
               Search &amp; Select from Inventory
             </Button>
           </div>
-
           {/* Bulk Toggle */}
           <div className="border-t pt-4">
             <CustomToggle id="editBulkSale" checked={editForm.isBulk}
@@ -1161,7 +1170,6 @@ export default function SalesPage() {
               </div>
             )}
           </div>
-
           {/* Description */}
           <div>
             <label className="block text-sm font-medium mb-1 dark:text-gray-200">
@@ -1171,10 +1179,9 @@ export default function SalesPage() {
               onChange={(e) => setEditForm(prev => ({ ...prev, description: e.target.value }))}
               placeholder="Add a note or description..." rows={2} />
           </div>
-
-          {/* ── Sold Date (editable) ── */}
+          {/* Sold Date */}
           <div className="border-t pt-4">
-          <label className="text-sm font-medium mb-1 dark:text-gray-200 flex items-center gap-2">
+            <label className="text-sm font-medium mb-1 dark:text-gray-200 flex items-center gap-2">
               <Calendar size={15} />
               Sold Date
             </label>
@@ -1184,7 +1191,6 @@ export default function SalesPage() {
               className={inputCls} />
             <p className="text-xs text-gray-400 mt-1">Leave unchanged to keep the original sale date.</p>
           </div>
-
           {/* Customer info */}
           <div className="border-t pt-4 space-y-4">
             <p className="text-sm font-medium text-gray-700 dark:text-gray-200">Customer Information</p>
@@ -1210,7 +1216,6 @@ export default function SalesPage() {
               )}
             </div>
           </div>
-
           <div className="flex gap-2 pt-4">
             <Button variant="outline" onClick={() => setIsEditModalOpen(false)} disabled={isSubmitting}>Cancel</Button>
             <Button onClick={handleUpdateSale} disabled={isSubmitting}>
@@ -1219,7 +1224,6 @@ export default function SalesPage() {
           </div>
         </div>
       </CustomModal>
-
       {/* ════════════════════════════════════════════════════════════════════════
           EDIT ENTRY SEARCH MODAL
       ════════════════════════════════════════════════════════════════════════ */}
@@ -1241,7 +1245,6 @@ export default function SalesPage() {
           </div>
         </div>
       </CustomModal>
-
       {/* ════════════════════════════════════════════════════════════════════════
           FILTER MODAL
       ════════════════════════════════════════════════════════════════════════ */}
@@ -1268,7 +1271,9 @@ export default function SalesPage() {
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Category</label>
-              {filters.metalType ? (
+              {isFilterCategoryLoading ? (
+                <CategoryLoadingPlaceholder />
+              ) : filters.metalType ? (
                 <CustomSelect value={filters.category} onValueChange={(v) => handleFilterChange('category', v)}>
                   <option value="">All Categories</option>
                   {availableCategories.map(c => <option key={c} value={c}>{c}</option>)}
@@ -1315,7 +1320,6 @@ export default function SalesPage() {
           </div>
         </div>
       </CustomModal>
-
       {/* ════════════════════════════════════════════════════════════════════════
           DELETE RANGE MODAL
       ════════════════════════════════════════════════════════════════════════ */}
@@ -1348,7 +1352,6 @@ export default function SalesPage() {
           </div>
         </div>
       </CustomModal>
-
     </div>
   );
 }
