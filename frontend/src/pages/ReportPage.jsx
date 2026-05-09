@@ -1575,68 +1575,114 @@ const generateCustomerPDFReport = async (reportData, filename, selectedFields) =
                     <div className="bg-gradient-to-br from-yellow-50 to-amber-50 dark:from-yellow-900/20 dark:to-amber-900/20 backdrop-blur-sm rounded-xl md:rounded-2xl p-4 sm:p-6 md:p-8 border border-yellow-200/50 dark:border-yellow-700/50 shadow-lg hover:shadow-xl transition-all duration-300">
                       <h4 className="text-base sm:text-lg md:text-xl font-bold text-yellow-800 dark:text-yellow-200 mb-6 flex items-center gap-2"><div className="w-3 h-3 bg-gradient-to-r from-yellow-400 to-amber-500 rounded-full"></div>Gold Weight Leaders</h4>
                       {salesData.goldWeightLeaders && salesData.goldWeightLeaders.length > 0 ? (
-                        <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-lg border border-gray-200/50 dark:border-gray-700/50 overflow-hidden">
-                          <div className="hidden sm:block">
-                            <table className="w-full text-sm">
-                              <thead className="bg-gradient-to-r from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-600">
-                                <tr>
-                                  <th className="text-left p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">Category</th>
-                                  <th className="text-center p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">Purity</th>
-                                  <th className="text-right p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">Weight</th>
-                                  <th className="text-right p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">Revenue</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {salesData.goldWeightLeaders.slice(0, 5).map((item, index) => (
-                                  <tr key={index} className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50/80 dark:hover:bg-gray-700/50 transition-colors duration-200">
-                                    <td className="p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">{item.category}</td>
-                                    <td className="p-3 md:p-4 text-center font-bold text-yellow-600 dark:text-yellow-400">{item.purity}%</td>
-                                    <td className="p-3 md:p-4 text-right font-bold text-amber-600 dark:text-amber-400">{item.totalGrossWeight} g</td>
-                                    <td className="p-3 md:p-4 text-right text-gray-700 dark:text-gray-300">₹{item.totalSalesAmount.toLocaleString()}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="flex items-center justify-center h-[200px] bg-white/60 dark:bg-gray-800/60 backdrop-blur-sm rounded-xl border border-gray-200/50 dark:border-gray-700/50">
-                          <p className="text-sm text-gray-500 dark:text-gray-400 text-center px-4">No gold weight data available</p>
-                        </div>
-                      )}
+  <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-xl shadow-lg border border-gray-200/50 dark:border-gray-700/50 overflow-hidden">
+    {/* Desktop table */}
+    <div className="hidden sm:block">
+      <table className="w-full text-sm">
+        <thead className="bg-gradient-to-r from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-600">
+          <tr>
+            <th className="text-left p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">Category</th>
+            <th className="text-center p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">Purity</th>
+            <th className="text-right p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">Weight</th>
+            <th className="text-right p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">Revenue</th>
+          </tr>
+        </thead>
+        <tbody>
+          {salesData.goldWeightLeaders.slice(0, 5).map((item, index) => (
+            <tr key={index} className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50/80 dark:hover:bg-gray-700/50 transition-colors duration-200">
+              <td className="p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">{item.category}</td>
+              <td className="p-3 md:p-4 text-center font-bold text-yellow-600 dark:text-yellow-400">{item.purity}%</td>
+              <td className="p-3 md:p-4 text-right font-bold text-amber-600 dark:text-amber-400">{item.totalGrossWeight} g</td>
+              <td className="p-3 md:p-4 text-right text-gray-700 dark:text-gray-300">₹{formatIndianNumber(item.totalSalesAmount)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+    {/* Mobile cards */}
+    <div className="block sm:hidden space-y-3 p-3">
+      {salesData.goldWeightLeaders.slice(0, 5).map((item, index) => (
+        <div key={index} className="bg-yellow-50/60 dark:bg-gray-700/60 backdrop-blur-sm rounded-lg p-3 border border-yellow-200/50 dark:border-gray-600/50">
+          <h5 className="font-bold text-yellow-800 dark:text-yellow-200 mb-2">{item.category}</h5>
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Purity</p>
+              <p className="text-sm font-bold text-yellow-600 dark:text-yellow-400">{item.purity}%</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Weight</p>
+              <p className="text-sm font-bold text-amber-600 dark:text-amber-400">{item.totalGrossWeight}g</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Revenue</p>
+              <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">₹{formatIndianNumber(item.totalSalesAmount)}</p>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+) : (
+  <div className="flex items-center justify-center h-[200px] bg-white/60 dark:bg-gray-800/60 backdrop-blur-sm rounded-xl border border-gray-200/50 dark:border-gray-700/50">
+    <p className="text-sm text-gray-500 dark:text-gray-400 text-center px-4">No gold weight data available</p>
+  </div>
+)}
                     </div>
                     <div className="bg-gradient-to-br from-gray-50 to-slate-50 dark:from-gray-800 dark:to-slate-800 backdrop-blur-sm rounded-xl md:rounded-2xl p-4 sm:p-6 md:p-8 border border-gray-200/50 dark:border-gray-600/50 shadow-lg hover:shadow-xl transition-all duration-300">
                       <h4 className="text-base sm:text-lg md:text-xl font-bold text-gray-800 dark:text-gray-200 mb-6 flex items-center gap-2"><div className="w-3 h-3 bg-gradient-to-r from-gray-400 to-slate-500 rounded-full"></div>Silver Weight Leaders</h4>
                       {salesData.silverWeightLeaders && salesData.silverWeightLeaders.length > 0 ? (
-                        <div className="bg-white/80 dark:bg-gray-700/80 backdrop-blur-sm rounded-xl shadow-lg border border-gray-200/50 dark:border-gray-600/50 overflow-hidden">
-                          <div className="hidden sm:block">
-                            <table className="w-full text-sm">
-                              <thead className="bg-gradient-to-r from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-600">
-                                <tr>
-                                  <th className="text-left p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">Category</th>
-                                  <th className="text-center p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">Purity</th>
-                                  <th className="text-right p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">Weight</th>
-                                  <th className="text-right p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">Revenue</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {salesData.silverWeightLeaders.slice(0, 5).map((item, index) => (
-                                  <tr key={index} className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50/80 dark:hover:bg-gray-700/50 transition-colors duration-200">
-                                    <td className="p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">{item.category}</td>
-                                    <td className="p-3 md:p-4 text-center font-bold text-gray-600 dark:text-gray-400">{item.purity}%</td>
-                                    <td className="p-3 md:p-4 text-right font-bold text-slate-600 dark:text-slate-400">{item.totalGrossWeight} g</td>
-                                    <td className="p-3 md:p-4 text-right text-gray-700 dark:text-gray-300">₹{item.totalSalesAmount.toLocaleString()}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="flex items-center justify-center h-[200px] bg-white/60 dark:bg-gray-700/60 backdrop-blur-sm rounded-xl border border-gray-200/50 dark:border-gray-600/50">
-                          <p className="text-sm text-gray-500 dark:text-gray-400 text-center px-4">No silver weight data available</p>
-                        </div>
-                      )}
+  <div className="bg-white/80 dark:bg-gray-700/80 backdrop-blur-sm rounded-xl shadow-lg border border-gray-200/50 dark:border-gray-600/50 overflow-hidden">
+    {/* Desktop table */}
+    <div className="hidden sm:block">
+      <table className="w-full text-sm">
+        <thead className="bg-gradient-to-r from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-600">
+          <tr>
+            <th className="text-left p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">Category</th>
+            <th className="text-center p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">Purity</th>
+            <th className="text-right p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">Weight</th>
+            <th className="text-right p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">Revenue</th>
+          </tr>
+        </thead>
+        <tbody>
+          {salesData.silverWeightLeaders.slice(0, 5).map((item, index) => (
+            <tr key={index} className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50/80 dark:hover:bg-gray-700/50 transition-colors duration-200">
+              <td className="p-3 md:p-4 font-semibold text-gray-900 dark:text-gray-100">{item.category}</td>
+              <td className="p-3 md:p-4 text-center font-bold text-gray-600 dark:text-gray-400">{item.purity}%</td>
+              <td className="p-3 md:p-4 text-right font-bold text-slate-600 dark:text-slate-400">{item.totalGrossWeight} g</td>
+              <td className="p-3 md:p-4 text-right text-gray-700 dark:text-gray-300">₹{formatIndianNumber(item.totalSalesAmount)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+    {/* Mobile cards */}
+    <div className="block sm:hidden space-y-3 p-3">
+      {salesData.silverWeightLeaders.slice(0, 5).map((item, index) => (
+        <div key={index} className="bg-gray-50/60 dark:bg-gray-700/60 backdrop-blur-sm rounded-lg p-3 border border-gray-200/50 dark:border-gray-600/50">
+          <h5 className="font-bold text-gray-800 dark:text-gray-200 mb-2">{item.category}</h5>
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Purity</p>
+              <p className="text-sm font-bold text-gray-600 dark:text-gray-400">{item.purity}%</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Weight</p>
+              <p className="text-sm font-bold text-slate-600 dark:text-slate-400">{item.totalGrossWeight}g</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Revenue</p>
+              <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">₹{formatIndianNumber(item.totalSalesAmount)}</p>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+) : (
+  <div className="flex items-center justify-center h-[200px] bg-white/60 dark:bg-gray-700/60 backdrop-blur-sm rounded-xl border border-gray-200/50 dark:border-gray-600/50">
+    <p className="text-sm text-gray-500 dark:text-gray-400 text-center px-4">No silver weight data available</p>
+  </div>
+)}
                     </div>
                   </div>
                 </div>
